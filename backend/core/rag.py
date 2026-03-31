@@ -3,7 +3,7 @@ import math
 import re
 from collections import Counter, defaultdict
 
-from langchain.docstore.document import Document
+from langchain_core.documents import Document
 
 from services.query_rewriter import rewrite_query
 from services.context_compressor import compress_context

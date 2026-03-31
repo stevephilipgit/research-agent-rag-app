@@ -1,7 +1,7 @@
 import logging
 import re
 from typing import List, Union
-from langchain.docstore.document import Document
+from langchain_core.documents import Document
 from langchain_core.messages import SystemMessage
 from config import ENABLE_VALIDATION
 from core.telemetry import emit_log

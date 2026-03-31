@@ -1,6 +1,6 @@
 import logging
 from typing import List
-from langchain.docstore.document import Document
+from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage, SystemMessage
 from config import ENABLE_COMPRESSION
 from core.telemetry import emit_log

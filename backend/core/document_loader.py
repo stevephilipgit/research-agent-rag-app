@@ -6,7 +6,7 @@ import os
 import re
 from typing import Callable, List, Optional
 
-from langchain.docstore.document import Document
+from langchain_core.documents import Document
 from langchain_community.document_loaders import (
     CSVLoader,
     Docx2txtLoader,
