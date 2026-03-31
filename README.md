@@ -180,7 +180,7 @@ ENABLE_HYBRID=true
 2. Connect your GitHub repository.
 3. **Runtime**: `Python 3`
 4. **Build Command**: `pip install -r requirements.txt`
-5. **Start Command**: `uvicorn backend.main:app --host 0.0.0.0 --port $PORT`
+5. **Start Command**: `uvicorn main:app --host 0.0.0.0 --port $PORT`
 6. **Environment Variables**: Add all variables from the `.env` section.
 
 ### 🎨 Frontend (Netlify)
