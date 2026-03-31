@@ -3,7 +3,7 @@ import os
 import json
 import logging
 from typing import Optional, Any
-from backend.config.settings import ENABLE_CACHE
+from config.settings import ENABLE_CACHE
 import redis
 
 logger = logging.getLogger(__name__)

@@ -2,11 +2,11 @@
 
 import logging
 
-from backend.utils.cache_db import get_cached_retrieval, set_cached_retrieval
-from backend.core.document_loader import load_vector_store
-from backend.core.query_rewriter_legacy import rewrite_query
-from backend.core.reranker import rerank
-from backend.core.telemetry import emit_log
+from utils.cache_db import get_cached_retrieval, set_cached_retrieval
+from core.document_loader import load_vector_store
+from core.query_rewriter_legacy import rewrite_query
+from core.reranker import rerank
+from core.telemetry import emit_log
 
 logger = logging.getLogger(__name__)
 

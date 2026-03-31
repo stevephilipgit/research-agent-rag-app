@@ -3,7 +3,7 @@ import logging
 from typing import List, Optional
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
-from backend.config.settings import QDRANT_URL, QDRANT_API_KEY, EMBEDDING_DIMENSION
+from config.settings import QDRANT_URL, QDRANT_API_KEY, EMBEDDING_DIMENSION
 
 logger = logging.getLogger(__name__)
 

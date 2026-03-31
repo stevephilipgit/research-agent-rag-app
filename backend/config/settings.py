@@ -10,7 +10,7 @@ os.environ["MKL_NUM_THREADS"] = "1"
 
 load_dotenv()
 
-ROOT_DIR = Path(__file__).resolve().parents[2]
+ROOT_DIR = Path(__file__).resolve().parents[1]
 
 # ===== API KEYS =====
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")

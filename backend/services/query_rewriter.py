@@ -1,9 +1,9 @@
 import logging
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from backend.config import ENABLE_REWRITE
-from backend.core.query_rewriter_legacy import rewrite_query as legacy_rewrite_query
-from backend.core.telemetry import emit_log
+from config import ENABLE_REWRITE
+from core.query_rewriter_legacy import rewrite_query as legacy_rewrite_query
+from core.telemetry import emit_log
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +22,7 @@ Rules:
 def _get_rewriter_llm():
     global _rewriter_llm
     if _rewriter_llm is None:
-        from backend.config.llm import get_llm
+        from config.llm import get_llm
         _rewriter_llm = get_llm()
     return _rewriter_llm
 

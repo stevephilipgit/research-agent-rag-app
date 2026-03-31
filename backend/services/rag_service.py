@@ -17,16 +17,16 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from backend.core.agent import run_research_agent, run_research_agent_stream
-from backend.config import DOCUMENTS_PATH, ROOT_DIR
-from backend.core.document_loader import delete_document, ingest_documents
-from backend.infra.db import load_registry, save_doc_to_registry
-from backend.core.telemetry import emit_log, get_logs as get_structured_logs
-from backend.services.security import validate_file
-from backend.infra.storage import upload_file, delete_file, get_file_url
-from backend.infra.vector_db import get_collection_count, delete_vectors_by_doc_id
-from backend.utils.sanitize import clean_query
-from backend.config.settings import PROCESSED_PATH
+from core.agent import run_research_agent, run_research_agent_stream
+from config import DOCUMENTS_PATH, ROOT_DIR
+from core.document_loader import delete_document, ingest_documents
+from infra.db import load_registry, save_doc_to_registry
+from core.telemetry import emit_log, get_logs as get_structured_logs
+from services.security import validate_file
+from infra.storage import upload_file, delete_file, get_file_url
+from infra.vector_db import get_collection_count, delete_vectors_by_doc_id
+from utils.sanitize import clean_query
+from config.settings import PROCESSED_PATH
 
 # In-memory session store
 _session_histories: dict[str, list[dict]] = {}

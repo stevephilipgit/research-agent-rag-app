@@ -1,4 +1,4 @@
-from backend.config import ENABLE_TOOL_GUARD
+from config import ENABLE_TOOL_GUARD
 
 ALLOWED_TOOLS = ["calculator", "document_search", "read_url", "summarize_text"]
 

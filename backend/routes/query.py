@@ -2,10 +2,10 @@ import json
 from typing import List
 
 from fastapi import APIRouter, File, HTTPException, UploadFile, Request
-from backend.utils.rate_limiter import limiter
+from utils.rate_limiter import limiter
 from fastapi.responses import StreamingResponse
 
-from backend.models.schema import (
+from models.schema import (
     DeleteResponse,
     DocumentListResponse,
     HistoryResponse,
@@ -14,8 +14,8 @@ from backend.models.schema import (
     QueryResponse,
     UploadResponse,
 )
-from backend.config.settings import REQUESTS_PER_MINUTE, STREAM_REQUESTS_PER_MINUTE, UPLOAD_REQUESTS_PER_MINUTE
-from backend.services.rag_service import (
+from config.settings import REQUESTS_PER_MINUTE, STREAM_REQUESTS_PER_MINUTE, UPLOAD_REQUESTS_PER_MINUTE
+from services.rag_service import (
     delete_registered_document,
     get_documents,
     get_history,
@@ -24,7 +24,7 @@ from backend.services.rag_service import (
     stream_query_events,
     upload_documents,
 )
-from backend.core.telemetry import get_logs as get_structured_logs, subscribe, unsubscribe, wait_for_log
+from core.telemetry import get_logs as get_structured_logs, subscribe, unsubscribe, wait_for_log
 
 router = APIRouter(prefix="/api", tags=["api"])
 

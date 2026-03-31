@@ -3,8 +3,8 @@ import time
 from typing import List, Dict, Any, Tuple
 from threading import Lock
 
-from backend.config import ENABLE_MEMORY
-from backend.core.telemetry import emit_log
+from config import ENABLE_MEMORY
+from core.telemetry import emit_log
 
 logger = logging.getLogger(__name__)
 

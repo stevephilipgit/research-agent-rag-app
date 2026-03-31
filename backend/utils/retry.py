@@ -1,6 +1,6 @@
 import time
 import logging
-from backend.config import ENABLE_RETRY
+from config import ENABLE_RETRY
 
 logger = logging.getLogger(__name__)
 

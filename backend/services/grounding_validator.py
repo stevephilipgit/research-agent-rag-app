@@ -3,8 +3,8 @@ import re
 from typing import List, Union
 from langchain.docstore.document import Document
 from langchain_core.messages import SystemMessage
-from backend.config import ENABLE_VALIDATION
-from backend.core.telemetry import emit_log
+from config import ENABLE_VALIDATION
+from core.telemetry import emit_log
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,7 @@ Return "INVALID" if the answer is completely unrelated or contains major halluci
 def _get_validator_llm():
     global _validator_llm
     if _validator_llm is None:
-        from backend.config.llm import get_llm
+        from config.llm import get_llm
         _validator_llm = get_llm()
     return _validator_llm
 

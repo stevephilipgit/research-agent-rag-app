@@ -1,6 +1,6 @@
 import logging
 from supabase import create_client, Client
-from backend.config.settings import SUPABASE_URL, SUPABASE_KEY
+from config.settings import SUPABASE_URL, SUPABASE_KEY
 
 logger = logging.getLogger(__name__)
 

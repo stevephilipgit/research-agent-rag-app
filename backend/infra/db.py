@@ -2,7 +2,7 @@ import os
 import json
 import logging
 from typing import List
-from backend.config.settings import ROOT_DIR
+from config.settings import ROOT_DIR
 
 DOC_REGISTRY_PATH = ROOT_DIR / "data" / "doc_registry.json"
 logger = logging.getLogger(__name__)

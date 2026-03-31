@@ -5,14 +5,14 @@ from collections import Counter, defaultdict
 
 from langchain.docstore.document import Document
 
-from backend.services.query_rewriter import rewrite_query
-from backend.services.context_compressor import compress_context
-from backend.config import ENABLE_CACHE, ENABLE_HYBRID, ENABLE_REWRITE, ENABLE_COMPRESSION
-from backend.infra.embeddings import get_embeddings
-from backend.infra.vector_db import search_vectors, get_collection_count
-from backend.core.reranker import rerank
-from backend.core.telemetry import emit_log
-from backend.utils.cache import (
+from services.query_rewriter import rewrite_query
+from services.context_compressor import compress_context
+from config import ENABLE_CACHE, ENABLE_HYBRID, ENABLE_REWRITE, ENABLE_COMPRESSION
+from infra.embeddings import get_embeddings
+from infra.vector_db import search_vectors, get_collection_count
+from core.reranker import rerank
+from core.telemetry import emit_log
+from utils.cache import (
     get_embedding_cache,
     get_query_cache,
     set_embedding_cache,

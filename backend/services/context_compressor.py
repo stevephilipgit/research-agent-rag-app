@@ -2,8 +2,8 @@ import logging
 from typing import List
 from langchain.docstore.document import Document
 from langchain_core.messages import HumanMessage, SystemMessage
-from backend.config import ENABLE_COMPRESSION
-from backend.core.telemetry import emit_log
+from config import ENABLE_COMPRESSION
+from core.telemetry import emit_log
 
 logger = logging.getLogger(__name__)
 
@@ -12,7 +12,7 @@ _compressor_llm = None
 def _get_compressor_llm():
     global _compressor_llm
     if _compressor_llm is None:
-        from backend.config.llm import get_llm
+        from config.llm import get_llm
         _compressor_llm = get_llm()
     return _compressor_llm
 

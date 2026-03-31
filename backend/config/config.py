@@ -65,4 +65,4 @@ if sys.version_info >= (3, 14):
     logging.getLogger(__name__).warning(PYTHON_VERSION_WARNING)
 
 # Test command
-# python -c "from backend.config import GROQ_API_KEY, GROQ_MODEL; print(GROQ_MODEL, GROQ_API_KEY[:8])"
+# python -c "from config import GROQ_API_KEY, GROQ_MODEL; print(GROQ_MODEL, GROQ_API_KEY[:8])"

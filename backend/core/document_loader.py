@@ -14,18 +14,18 @@ from langchain_community.document_loaders import (
     TextLoader,
     UnstructuredWordDocumentLoader,
 )
-from backend.config.settings import (
+from config.settings import (
     DOCUMENTS_PATH,
     SUPPORTED_EXTENSIONS,
     CHUNK_SIZE,
     CHUNK_OVERLAP,
     PROCESSED_PATH,
 )
-from backend.infra.embeddings import get_embeddings
-from backend.infra.vector_db import upsert_vectors, delete_vectors_by_doc_id, get_collection_count
-from backend.infra.db import load_registry, remove_from_registry
-from backend.utils.file_handling import download_file, is_url
-from backend.infra.storage import get_file_url
+from infra.embeddings import get_embeddings
+from infra.vector_db import upsert_vectors, delete_vectors_by_doc_id, get_collection_count
+from infra.db import load_registry, remove_from_registry
+from utils.file_handling import download_file, is_url
+from infra.storage import get_file_url
 
 logger = logging.getLogger(__name__)
 

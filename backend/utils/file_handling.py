@@ -2,7 +2,7 @@ import requests
 import os
 import uuid
 import logging
-from backend.config.settings import PROCESSED_PATH, MAX_FILE_SIZE
+from config.settings import PROCESSED_PATH, MAX_FILE_SIZE
 
 logger = logging.getLogger(__name__)
 

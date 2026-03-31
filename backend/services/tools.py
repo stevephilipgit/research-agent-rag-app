@@ -4,8 +4,8 @@ from typing import Any, Dict
 
 from langchain.tools import tool
 
-from backend.core.telemetry import emit_log
-from backend.config import ENABLE_TOOLS_ADVANCED
+from core.telemetry import emit_log
+from config import ENABLE_TOOLS_ADVANCED
 
 logger = logging.getLogger(__name__)
 

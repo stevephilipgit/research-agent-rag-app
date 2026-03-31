@@ -3,7 +3,7 @@ import os
 import threading
 import time
 
-from backend.core.telemetry import emit_log
+from core.telemetry import emit_log
 
 logger = logging.getLogger(__name__)
 

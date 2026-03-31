@@ -7,15 +7,15 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from langgraph.graph import StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
-from backend.utils.cache_db import get_cached_response, set_cached_response
+from utils.cache_db import get_cached_response, set_cached_response
 try:
-    from backend.core.telemetry import emit_log
+    from core.telemetry import emit_log
 except ImportError:
     def emit_log(step: str, status: str = "success", detail: str = "", scope: str = "system"):
         pass
 
-from backend.core.tools import all_tools
-from backend.config.settings import (
+from core.tools import all_tools
+from config.settings import (
     ENABLE_CACHE,
     ENABLE_MEMORY,
     ENABLE_SECURITY,
@@ -24,14 +24,14 @@ from backend.config.settings import (
     ENABLE_TOOL_GUARD,
     ENABLE_RETRY,
 )
-from backend.services.security import sanitize_input, validate_input, detect_injection
-from backend.services.memory import save_memory, get_memory, build_prompt_with_memory
-from backend.services.grounding_validator import validate_answer
-from backend.services.tool_guard import is_tool_allowed
-from backend.utils.cache import get_cache, set_cache
-from backend.utils.retry import retry_call
-from backend.utils.sanitize import safe_llm_call, safe_tool_call
-from backend.utils.streaming import safe_stream
+from services.security import sanitize_input, validate_input, detect_injection
+from services.memory import save_memory, get_memory, build_prompt_with_memory
+from services.grounding_validator import validate_answer
+from services.tool_guard import is_tool_allowed
+from utils.cache import get_cache, set_cache
+from utils.retry import retry_call
+from utils.sanitize import safe_llm_call, safe_tool_call
+from utils.streaming import safe_stream
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +72,7 @@ Rules:
 - Preserve source grounding
 """
 
-from backend.config.llm import get_llm
+from config.llm import get_llm
 llm = get_llm()
 llm_with_tools = llm.bind_tools(all_tools)
 tool_node = ToolNode(tools=all_tools)

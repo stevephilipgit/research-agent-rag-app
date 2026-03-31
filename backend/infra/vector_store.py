@@ -3,8 +3,8 @@ import logging
 from typing import Optional, Callable
 from chromadb.config import Settings
 from langchain_chroma import Chroma
-from backend.config import VECTOR_STORE_PATH
-from backend.infra.embeddings import get_embeddings
+from config import VECTOR_STORE_PATH
+from infra.embeddings import get_embeddings
 
 logger = logging.getLogger(__name__)
 _vector_store: Optional[Chroma] = None

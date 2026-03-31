@@ -2,8 +2,8 @@ import logging
 import re
 from typing import List
 
-from backend.config import ENABLE_SECURITY
-from backend.core.telemetry import emit_log
+from config import ENABLE_SECURITY
+from core.telemetry import emit_log
 
 logger = logging.getLogger(__name__)
 
