@@ -1,6 +1,7 @@
 import sys
 import os
 import logging
+print("APP STARTING...")
 from pathlib import Path
 from config.settings import REQUESTS_PER_MINUTE, LOG_PATH
 
@@ -40,11 +41,16 @@ app.add_middleware(
 )
 
 app.include_router(query_router)
+print("ROUTES LOADED")
 
 
-@app.on_event("startup")
-def warmup_models() -> None:
-    warmup_reranker()
+@app.get("/")
+def health():
+    return {"status": "ok"}
+
+
+# Warmup logic removed from startup to prevent blocking Render port detection.
+# Models will now load lazily on the first request.
 
 
 @app.get("/health")

@@ -36,6 +36,7 @@ def init_collection():
 
 def upsert_vectors(points: List[dict]):
     """Upserts a list of vector points into Qdrant."""
+    init_collection()  # Lazy initialization
     try:
         client.upsert(
             collection_name=COLLECTION_NAME,
@@ -54,6 +55,7 @@ def upsert_vectors(points: List[dict]):
 
 def search_vectors(query_vector: List[float], limit: int = 5) -> List[dict]:
     """Performs semantic search in Qdrant based on a query vector."""
+    init_collection()  # Lazy initialization
     try:
         results = client.search(
             collection_name=COLLECTION_NAME,
@@ -97,6 +99,7 @@ def delete_vectors_by_doc_id(doc_id: str):
 
 def get_collection_count() -> int:
     """Returns the total number of points in the Qdrant collection."""
+    init_collection()  # Lazy initialization
     try:
         res = client.get_collection(COLLECTION_NAME)
         return res.points_count
@@ -104,8 +107,5 @@ def get_collection_count() -> int:
         logger.error(f"Failed to get Qdrant collection count: {exc}")
         return 0
 
-# Optional initialization on module load
-try:
-    init_collection()
-except:
-    pass
+# Removed top-level init call to prevent startup blocking.
+# Operations will lazy-initialize the collection as needed.
