@@ -1,0 +1,73 @@
+import hashlib
+import os
+import json
+import logging
+from typing import Optional, Any
+from backend.config.settings import ENABLE_CACHE
+import redis
+
+logger = logging.getLogger(__name__)
+
+# ===== REDIS CONFIG =====
+REDIS_URL = os.getenv("REDIS_URL")
+redis_client = None
+
+if REDIS_URL:
+    try:
+        redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
+    except Exception as e:
+        logger.warning(f"Failed to connect to Redis: {e}")
+
+# In-memory implementation for fallback
+_cache = {}
+
+def _get_key(prefix: str, query: str) -> str:
+    h = hashlib.md5(query.encode()).hexdigest()
+    return f"{prefix}:{h}"
+
+def get_cache_raw(key: str) -> Optional[Any]:
+    if not ENABLE_CACHE:
+        return None
+    if redis_client:
+        try:
+            val = redis_client.get(key)
+            if val:
+                return json.loads(val)
+        except Exception as e:
+            logger.warning(f"Redis get failed for {key}: {e}")
+    return _cache.get(key)
+
+def set_cache_raw(key: str, value: Any, ttl: int = 300):
+    if not ENABLE_CACHE:
+        return
+    if redis_client:
+        try:
+            redis_client.set(key, json.dumps(value), ex=ttl)
+            return
+        except Exception as e:
+            logger.warning(f"Redis set failed for {key}: {e}")
+    _cache[key] = value
+
+def get_cache(key: str) -> Optional[Any]:
+    return get_cache_raw(_get_key("query", key))
+
+def set_cache(key: str, value: Any, ttl: int = 300):
+    set_cache_raw(_get_key("query", key), value, ttl)
+
+def get_query_cache(query: str) -> Optional[Any]:
+    return get_cache_raw(_get_key("query", query))
+
+def set_query_cache(query: str, docs: Any):
+    set_cache_raw(_get_key("query", query), docs)
+
+def get_embedding_cache(query: str) -> Optional[Any]:
+    return get_cache_raw(_get_key("emb", query))
+
+def set_embedding_cache(query: str, embedding: Any):
+    set_cache_raw(_get_key("emb", query), embedding)
+
+def get_cached_response(query: str) -> Optional[Any]:
+    return get_cache_raw(_get_key("resp", query))
+
+def set_cached_response(query: str, response: Any):
+    set_cache_raw(_get_key("resp", query), response)
