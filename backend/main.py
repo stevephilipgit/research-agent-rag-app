@@ -2,7 +2,7 @@ import sys
 import os
 import logging
 from pathlib import Path
-from backend.config.settings import REQUESTS_PER_MINUTE, LOG_PATH
+from config.settings import REQUESTS_PER_MINUTE, LOG_PATH
 
 # Initial environment loading is handled by settings.py
 from fastapi import FastAPI
@@ -10,14 +10,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.errors import RateLimitExceeded
-from backend.utils.rate_limiter import limiter
+from utils.rate_limiter import limiter
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from backend.routes.query import router as query_router
-from backend.core.reranker import warmup_reranker
+from routes.query import router as query_router
+from core.reranker import warmup_reranker
 
 app = FastAPI(title="RAG Agent Assistant API", version="1.0.0")
 
