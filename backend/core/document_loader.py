@@ -23,7 +23,7 @@ from config.settings import (
     PROCESSED_PATH,
 )
 from infra.embeddings import get_embeddings
-from infra.vector_db import upsert_vectors, delete_vectors_by_doc_id, get_collection_count
+from infra.vector_db import upsert_vectors, delete_vectors_by_doc_id, get_collection_count, is_indexed_in_qdrant
 from infra.db import load_registry, remove_from_registry
 from utils.file_handling import download_file, is_url
 from infra.storage import get_file_url
@@ -162,14 +162,27 @@ def ingest_documents(file_paths: Optional[List[str]] = None, callback: Optional[
         
         valid_paths = []
         for path in file_paths:
-            if not os.path.exists(path):
+            file_name = os.path.basename(path)
+            
+            # CORRECT — allow cloud storage paths starting with uploads/
+            if not os.path.exists(path) and not path.startswith("uploads/"):
+                record(f"Skipping {path} — file not found locally and not a cloud path")
                 continue
             
-            f_hash = get_file_hash(path)
-            if f_hash in processed_hashes:
-                record(f"Skipping duplicate file: {os.path.basename(path)} (already indexed)")
+            # Get hash (from disk if local, from registry if cloud)
+            f_hash = None
+            if path.startswith("uploads/"):
+                entry = next((d for d in registry if d.get("storage_path") == path), None)
+                f_hash = entry.get("file_hash") if entry else None
+            else:
+                f_hash = get_file_hash(path)
+            
+            # CORRECT — only skip if already in BOTH registry AND Qdrant
+            if f_hash in processed_hashes and is_indexed_in_qdrant(file_name):
+                record(f"Skipping {file_name} — already indexed in Qdrant")
                 continue
             
+            record(f"Queueing for ingestion: {file_name}")
             valid_paths.append((path, f_hash))
 
         if not valid_paths:

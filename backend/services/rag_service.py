@@ -163,7 +163,9 @@ async def upload_documents(files: List[UploadFile]) -> dict:
         }
 
     try:
+        logger.info(f"Starting ingestion process for {len(saved_paths)} new file(s): {saved_names}")
         result = ingest_documents(saved_paths, callback=_ingestion_callback)
+        logger.info(f"Ingestion completed with status: {result.get('status')}. Vector count: {result.get('vector_count')}")
         if result.get("status") == "success":
             log_event("File Upload", "success", "Upload & Ingestion completed", "pipeline")
             invalidate_cache()
