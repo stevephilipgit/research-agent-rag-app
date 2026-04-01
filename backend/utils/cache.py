@@ -4,19 +4,20 @@ import json
 import logging
 from typing import Optional, Any
 from config.settings import ENABLE_CACHE
-import redis
 
 logger = logging.getLogger(__name__)
 
-# ===== REDIS CONFIG =====
+# ===== CACHE CONFIG =====
+# Redis is optional — if not installed or REDIS_URL not set, falls back to in-memory cache.
 REDIS_URL = os.getenv("REDIS_URL")
 redis_client = None
 
 if REDIS_URL:
     try:
-        redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
+        import redis as _redis
+        redis_client = _redis.Redis.from_url(REDIS_URL, decode_responses=True)
     except Exception as e:
-        logger.warning(f"Failed to connect to Redis: {e}")
+        logger.warning(f"Redis unavailable, using in-memory cache: {e}")
 
 # In-memory implementation for fallback
 _cache = {}

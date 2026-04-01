@@ -1,57 +1,146 @@
+"""
+cache_db.py — Upstash Redis response cache.
+
+Uses the Upstash HTTP client (upstash-redis), NOT redis-py.
+Upstash uses a REST API, so it works on Render's free tier without TCP ports.
+
+All calls are wrapped in try/except — if Redis is down the app continues
+without caching (graceful degradation, never crashes).
+"""
 import hashlib
-import time
+import logging
+import os
+from typing import Optional
 
-# in-memory cache
-response_cache = {}
-retrieval_cache = {}
-cache_time = {}
+logger = logging.getLogger(__name__)
 
-TTL = 300  # 5 minutes
-
-
-def normalize_query(query: str):
-    return (query or "").strip().lower()
+_redis_client = None
 
 
-def get_cache_key(query: str):
-    q = normalize_query(query)
-    return hashlib.md5(q.encode()).hexdigest()
+def _get_redis():
+    """Lazily initialise the Upstash Redis client once and reuse it."""
+    global _redis_client
+    if _redis_client is not None:
+        return _redis_client
+
+    url = os.getenv("UPSTASH_REDIS_REST_URL")
+    token = os.getenv("UPSTASH_REDIS_REST_TOKEN")
+    if not url or not token:
+        logger.warning(
+            "UPSTASH_REDIS_REST_URL or UPSTASH_REDIS_REST_TOKEN not set — "
+            "response cache disabled, falling back to in-memory."
+        )
+        return None
+
+    try:
+        from upstash_redis import Redis
+        _redis_client = Redis(url=url, token=token)
+        logger.info("Upstash Redis client initialised.")
+        return _redis_client
+    except Exception as exc:
+        logger.warning(f"Upstash Redis unavailable, cache disabled: {exc}")
+        return None
 
 
-def _time_key(prefix: str, key: str) -> str:
-    return f"{prefix}:{key}"
+# In-memory fallback when Redis is unavailable
+_memory_cache: dict = {}
 
 
-def is_valid(prefix: str, key: str) -> bool:
-    tkey = _time_key(prefix, key)
-    return tkey in cache_time and (time.time() - cache_time[tkey] < TTL)
+def _make_key(query: str) -> str:
+    """MD5 hash of normalised query with a 'resp:' namespace prefix."""
+    digest = hashlib.md5(query.strip().lower().encode()).hexdigest()
+    return f"resp:{digest}"
 
 
-def get_cached_response(query):
-    key = get_cache_key(query)
-    if key in response_cache and is_valid("response", key):
-        print("CACHE HIT: response")
-        return response_cache.get(key)
-    print("CACHE MISS: response")
+def get_cached_response(query: str) -> Optional[str]:
+    """
+    Return cached answer string for *query*, or None on a MISS.
+    Tries Upstash Redis first, falls back to in-memory dict.
+    """
+    key = _make_key(query)
+    try:
+        redis = _get_redis()
+        if redis is not None:
+            value = redis.get(key)
+            if value:
+                logger.info(f"Cache HIT  (Redis) for query: {query[:50]}")
+                return value
+            logger.info(f"Cache MISS (Redis) for query: {query[:50]}")
+            return None
+    except Exception as exc:
+        logger.warning(f"Redis get failed, checking memory cache: {exc}")
+
+    # In-memory fallback
+    value = _memory_cache.get(key)
+    if value:
+        logger.info(f"Cache HIT  (memory) for query: {query[:50]}")
+        return value
+    logger.info(f"Cache MISS (memory) for query: {query[:50]}")
     return None
 
 
-def set_cached_response(query, response):
-    key = get_cache_key(query)
-    response_cache[key] = response
-    cache_time[_time_key("response", key)] = time.time()
+def set_cached_response(
+    query: str, response: str, ttl_seconds: int = 3600
+) -> None:
+    """
+    Store *response* in Redis (TTL 1h) and in-memory fallback.
+    """
+    key = _make_key(query)
+    try:
+        redis = _get_redis()
+        if redis is not None:
+            redis.set(key, response, ex=ttl_seconds)
+            logger.info(f"Cached response (Redis) for query: {query[:50]}")
+            return
+    except Exception as exc:
+        logger.warning(f"Redis set failed, storing in memory: {exc}")
+
+    # In-memory fallback
+    _memory_cache[key] = response
+    logger.info(f"Cached response (memory) for query: {query[:50]}")
 
 
-def get_cached_retrieval(query):
-    key = get_cache_key(query)
-    if key in retrieval_cache and is_valid("retrieval", key):
-        print("CACHE HIT: retrieval")
-        return retrieval_cache.get(key)
-    print("CACHE MISS: retrieval")
-    return None
+def invalidate_cache() -> None:
+    """
+    Flush ALL keys from Upstash Redis and clear the in-memory fallback.
+    Call this after new documents are ingested so stale answers are cleared.
+    """
+    global _memory_cache
+    _memory_cache = {}
+    try:
+        redis = _get_redis()
+        if redis is None:
+            logger.info("Cache invalidated — memory cache cleared (Redis not available).")
+            return
+        redis.flushdb()
+        logger.info("Cache invalidated — all Redis keys flushed + memory cleared.")
+    except Exception as exc:
+        logger.warning(f"Redis flush failed (memory still cleared): {exc}")
 
 
-def set_cached_retrieval(query, docs):
-    key = get_cache_key(query)
-    retrieval_cache[key] = docs
-    cache_time[_time_key("retrieval", key)] = time.time()
+# ── Retrieval cache (kept for backward compatibility with any future callers) ──
+
+def get_cached_retrieval(query: str) -> Optional[object]:
+    """Retrieval-level cache — uses same Redis/memory backend."""
+    key = _make_key(f"retrieval:{query}")
+    try:
+        redis = _get_redis()
+        if redis is not None:
+            return redis.get(key)
+    except Exception:
+        pass
+    return _memory_cache.get(key)
+
+
+def set_cached_retrieval(query: str, docs: object) -> None:
+    """Store retrieval docs in cache."""
+    key = _make_key(f"retrieval:{query}")
+    try:
+        redis = _get_redis()
+        if redis is not None:
+            import json
+            redis.set(key, json.dumps(docs) if not isinstance(docs, str) else docs, ex=3600)
+            return
+    except Exception:
+        pass
+    _memory_cache[key] = docs

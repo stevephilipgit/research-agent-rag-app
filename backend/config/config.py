@@ -7,8 +7,9 @@ from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 
-# Load environment variables
-load_dotenv()
+# Explicitly load from project root .env (two levels up from backend/config/)
+_ROOT_ENV = ROOT_DIR / ".env"
+load_dotenv(dotenv_path=_ROOT_ENV)
 os.environ.setdefault("USER_AGENT", "research-assistant/1.0")
 
 
@@ -18,7 +19,7 @@ def _env_flag(name: str, default: str = "true") -> bool:
 # Constants
 GROQ_API_KEY: Final[str] = os.getenv("GROQ_API_KEY", "")
 TAVILY_API_KEY: Final[str] = os.getenv("TAVILY_API_KEY", "")
-VECTOR_STORE_PATH: Final[str] = str(ROOT_DIR / "vector_store")
+VECTOR_STORE_PATH: Final[str] = os.environ.get("VECTOR_STORE_PATH", "./vector_store")
 DOCUMENTS_PATH: Final[str] = str(ROOT_DIR / "data" / "uploads")
 PROCESSED_PATH: Final[str] = str(ROOT_DIR / "data" / "processed")
 LOG_PATH: Final[str] = str(ROOT_DIR / "logs" / "app.log")

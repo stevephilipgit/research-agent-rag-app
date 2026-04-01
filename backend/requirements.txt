@@ -6,8 +6,6 @@ langchain-core>=0.1.0
 langchain-groq
 langchain-openai
 qdrant-client>=1.7.0
-supabase>=2.0.0
-redis>=5.0.0
 python-dotenv
 sentence-transformers
 slowapi
@@ -22,3 +20,5 @@ tavily-python
 httpx
 beautifulsoup4
 unstructured
+supabase
+upstash-redis

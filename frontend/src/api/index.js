@@ -1,39 +1,39 @@
 import axios from "axios";
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || "/api",
+  baseURL: import.meta.env.VITE_API_URL || "http://localhost:8000",
 });
 
 const resolveApiBase = () => {
-  const base = import.meta.env.VITE_API_BASE_URL;
+  const base = import.meta.env.VITE_API_URL;
   if (base) {
     return base.replace(/\/$/, "");
   }
-  return `${window.location.origin}/api`;
+  return "http://localhost:8000";
 };
 
 export const fetchHistory = async () => {
-  const { data } = await api.get("/history");
+  const { data } = await api.get("/api/history");
   return data;
 };
 
 export const fetchDocuments = async () => {
-  const { data } = await api.get("/documents");
+  const { data } = await api.get("/api/documents");
   return data;
 };
 
 export const fetchLogs = async () => {
-  const { data } = await api.get("/logs");
+  const { data } = await api.get("/api/logs");
   return data;
 };
 
 export const sendQuery = async (query) => {
-  const { data } = await api.post("/query", { query });
+  const { data } = await api.post("/api/query", { query });
   return data;
 };
 
 export const streamQuery = async ({ query, session_id, onEvent }) => {
-  const response = await fetch(`${resolveApiBase()}/query/stream`, {
+  const response = await fetch(`${resolveApiBase()}/api/query/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ query, session_id }),
@@ -113,7 +113,7 @@ export const streamQuery = async ({ query, session_id, onEvent }) => {
 };
 
 export const subscribeToLogs = ({ onSnapshot, onLog, onError }) => {
-  const source = new EventSource(`${resolveApiBase()}/logs/stream`);
+  const source = new EventSource(`${resolveApiBase()}/api/logs/stream`);
 
   source.addEventListener("snapshot", (event) => {
     onSnapshot?.(JSON.parse(event.data));
@@ -133,13 +133,13 @@ export const subscribeToLogs = ({ onSnapshot, onLog, onError }) => {
 export const uploadFiles = async (files) => {
   const formData = new FormData();
   files.forEach((file) => formData.append("files", file));
-  const { data } = await api.post("/upload", formData, {
+  const { data } = await api.post("/api/upload", formData, {
     headers: { "Content-Type": "multipart/form-data" },
   });
   return data;
 };
 
 export const deleteDocument = async (docId) => {
-  const { data } = await api.delete(`/documents/${docId}`);
+  const { data } = await api.delete(`/api/documents/${docId}`);
   return data;
 };

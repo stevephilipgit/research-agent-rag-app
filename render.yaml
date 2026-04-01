@@ -1,0 +1,35 @@
+services:
+  - type: web
+    name: research-assistant-backend
+    env: python
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: cd backend && uvicorn main:app --host 0.0.0.0 --port $PORT
+    plan: free
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false
+      - key: TAVILY_API_KEY
+        sync: false
+      - key: QDRANT_URL
+        sync: false
+      - key: QDRANT_API_KEY
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: UPSTASH_REDIS_REST_URL
+        sync: false
+      - key: UPSTASH_REDIS_REST_TOKEN
+        sync: false
+
+  - type: static
+    name: research-assistant-frontend
+    env: node
+    buildCommand: cd frontend && npm install && npm run build
+    staticPublishDir: frontend/dist
+    plan: free
+    envVars:
+      - key: VITE_API_URL
+        value: https://research-assistant-backend.onrender.com
+

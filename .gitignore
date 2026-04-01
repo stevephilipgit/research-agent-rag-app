@@ -20,6 +20,8 @@ coverage.xml
 # Env
 .env
 .env.example
+backend/.env
+frontend/.env.production
 
 # Data / local storage
 data/
@@ -28,6 +30,13 @@ uploads/
 temp/
 tmp/
 logs/
+*.log
+
+# Cleanup audit (local only)
+_cleanup/
+
+# Node
+node_modules/
 
 # OS
 .DS_Store

@@ -26,6 +26,7 @@ from services.security import validate_file
 from infra.storage import upload_file, delete_file, get_file_url
 from infra.vector_db import get_collection_count, delete_vectors_by_doc_id
 from utils.sanitize import clean_query
+from utils.cache_db import invalidate_cache
 from config.settings import PROCESSED_PATH
 
 # In-memory session store
@@ -152,6 +153,8 @@ async def upload_documents(files: List[UploadFile]) -> dict:
         result = ingest_documents(saved_paths, callback=_ingestion_callback)
         if result.get("status") == "success":
             log_event("File Upload", "success", f"Upload pipeline completed for {len(saved_paths)} file(s)", "pipeline")
+            invalidate_cache()
+            log_event("Cache", "success", "Response cache invalidated after new document ingestion", "pipeline")
         else:
             log_event("File Upload", "failure", result.get("message", "Ingestion failed"), "pipeline")
     finally:

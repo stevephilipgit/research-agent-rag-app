@@ -8,7 +8,9 @@ from dotenv import load_dotenv
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
 
-load_dotenv()
+# Explicitly load from project root .env (two levels up from backend/config/)
+_ROOT_ENV = Path(__file__).resolve().parents[2] / ".env"
+load_dotenv(dotenv_path=_ROOT_ENV)
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 
@@ -17,8 +19,6 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 
 # ===== CLOUD SERVICES =====
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 QDRANT_URL = os.getenv("QDRANT_URL")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
 
@@ -26,8 +26,6 @@ if not GROQ_API_KEY:
     raise ValueError("Missing GROQ_API_KEY. Please ensure it is set in your .env file.")
 if not TAVILY_API_KEY:
     raise ValueError("Missing TAVILY_API_KEY. Please ensure it is set in your .env file.")
-if not SUPABASE_URL or not SUPABASE_KEY:
-    raise ValueError("Missing SUPABASE credentials. Please check your .env file.")
 if not QDRANT_URL or not QDRANT_API_KEY:
     raise ValueError("Missing QDRANT credentials. Please check your .env file.")
 
