@@ -68,7 +68,7 @@ def get_cached_response(query: str) -> Optional[str]:
             logger.info(f"Cache MISS (Redis) for query: {query[:50]}")
             return None
     except Exception as exc:
-        logger.warning(f"Redis get failed, checking memory cache: {exc}")
+        logger.warning(f"Redis get failed, checking memory: {exc}")
 
     # In-memory fallback
     value = _memory_cache.get(key)
@@ -115,7 +115,7 @@ def invalidate_cache() -> None:
         redis.flushdb()
         logger.info("Cache invalidated — all Redis keys flushed + memory cleared.")
     except Exception as exc:
-        logger.warning(f"Redis flush failed (memory still cleared): {exc}")
+        logger.warning(f"Redis flush skipped (permission denied): {exc}")
 
 
 # ── Retrieval cache (kept for backward compatibility with any future callers) ──
@@ -127,8 +127,8 @@ def get_cached_retrieval(query: str) -> Optional[object]:
         redis = _get_redis()
         if redis is not None:
             return redis.get(key)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning(f"Redis get failed, checking memory: {exc}")
     return _memory_cache.get(key)
 
 
@@ -141,6 +141,6 @@ def set_cached_retrieval(query: str, docs: object) -> None:
             import json
             redis.set(key, json.dumps(docs) if not isinstance(docs, str) else docs, ex=3600)
             return
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning(f"Redis set failed, storing in memory: {exc}")
     _memory_cache[key] = docs

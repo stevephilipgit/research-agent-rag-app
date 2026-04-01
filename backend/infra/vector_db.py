@@ -3,6 +3,7 @@ import logging
 from typing import List, Optional
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
+from qdrant_client.models import NamedVector, ScoredPoint
 from config.settings import QDRANT_URL, QDRANT_API_KEY, EMBEDDING_DIMENSION
 
 logger = logging.getLogger(__name__)
@@ -60,12 +61,12 @@ def search_vectors(query_vector: List[float], limit: int = 5) -> List[dict]:
     """Performs semantic search in Qdrant based on a query vector."""
     init_collection()  # Lazy initialization
     try:
-        results = client.search(
+        results = client.query_points(
             collection_name=COLLECTION_NAME,
-            query_vector=query_vector,
+            query=query_vector,
             limit=limit,
             with_payload=True
-        )
+        ).points
         logger.info(f"Qdrant search returned {len(results)} results")
         return [
             {
