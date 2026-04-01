@@ -1,55 +1,47 @@
 # Python
-.venv/
 venv/
+.venv/
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
-.Python
-env/
-pip-log.txt
-pip-delete-this-directory.txt
-.tox/
-.coverage
-.cache
-nosetests.xml
-coverage.xml
-*,cover
-.hypothesis/
+*.egg-info/
+dist/
+build/
+
+# HuggingFace / sentence-transformers cache
+sentence_transformers/
+.cache/
+hf_cache/
+huggingface/
+**/sentence_transformers/
+**/.cache/
+
+# Vector store
+backend/vector_store/
+*.index
+*.faiss
+*.pkl
+
+# Data
+backend/data/uploads/
+backend/data/processed/
+
+# Logs
+backend/logs/
+*.log
 
 # Env
 .env
-.env.example
-backend/.env
-frontend/.env.production
-
-# Data / local storage
-data/
-vector_store/
-uploads/
-temp/
-tmp/
-logs/
-*.log
-
-# Cleanup audit (local only)
-_cleanup/
+.env.*
 
 # Node
-node_modules/
+frontend/node_modules/
+frontend/dist/
+
+# Cleanup audit (local only, preserved from prior settings to be safe)
+_cleanup/
 
 # OS
 .DS_Store
 Thumbs.db
-
-# IDE
-.vscode/
-.idea/
-
-# Frontend
-frontend/node_modules/
-frontend/dist/
-frontend/.env
-frontend/.next/
-frontend/out/
-frontend/build/
