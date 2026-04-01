@@ -37,6 +37,7 @@ def rate_limit_handler(request, exc):
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
+        "https://research-rag-agent.netlify.app",
         "https://research-assistant-frontend.onrender.com",
         "http://localhost:5173",
         "http://localhost:3000",
