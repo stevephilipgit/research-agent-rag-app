@@ -22,6 +22,12 @@ services:
         sync: false
       - key: UPSTASH_REDIS_REST_TOKEN
         sync: false
+      - key: SENTENCE_TRANSFORMERS_HOME
+        value: /tmp/sentence_transformers
+      - key: TRANSFORMERS_CACHE
+        value: /tmp/hf_cache
+      - key: HF_HOME
+        value: /tmp/hf_home
 
   - type: static
     name: research-assistant-frontend
@@ -32,4 +38,3 @@ services:
     envVars:
       - key: VITE_API_URL
         value: https://research-assistant-backend.onrender.com
-
