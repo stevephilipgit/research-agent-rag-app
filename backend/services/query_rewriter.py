@@ -1,8 +1,8 @@
 import logging
+import re
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from config import ENABLE_REWRITE
-from core.query_rewriter_legacy import rewrite_query as legacy_rewrite_query
 from core.telemetry import emit_log
 
 logger = logging.getLogger(__name__)
@@ -27,6 +27,14 @@ def _get_rewriter_llm():
     return _rewriter_llm
 
 
+def _clean_fallback(query: str) -> str:
+    query = query.lower().strip()
+    filler = ["give", "explain", "tell", "describe", "what is", "what are", "please", "define"]
+    for f in filler:
+        query = query.replace(f, "")
+    return re.sub(r"\s+", " ", query).strip()
+
+
 def rewrite_query(query: str) -> str:
     if not ENABLE_REWRITE or not query or not query.strip():
         return query
@@ -49,7 +57,7 @@ def rewrite_query(query: str) -> str:
         emit_log("Query Rewrite", "failure", f"Rewrite failed, using fallback: {exc}", "query")
 
     try:
-        improved_query = legacy_rewrite_query(query, history=[])
+        improved_query = _clean_fallback(query)
         if improved_query:
             emit_log("Query Rewrite", "success", "Query rewritten", "query")
             return improved_query
