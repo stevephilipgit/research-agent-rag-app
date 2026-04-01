@@ -1,16 +1,24 @@
 import axios from "axios";
 
+const BASE_URL =
+  (import.meta.env.VITE_API_URL || "https://research-agent-rag-app-1.onrender.com").replace(/\/$/, "");
+
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || "http://localhost:8000",
+  baseURL: BASE_URL,
 });
 
-const resolveApiBase = () => {
-  const base = import.meta.env.VITE_API_URL;
-  if (base) {
-    return base.replace(/\/$/, "");
+axios.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    const message =
+      error.response?.data?.detail ||
+      error.response?.data?.message ||
+      "Something went wrong. Please try again.";
+    return Promise.reject(new Error(message));
   }
-  return "http://localhost:8000";
-};
+);
+
+const resolveApiBase = () => BASE_URL;
 
 export const fetchHistory = async () => {
   const { data } = await api.get("/api/history");
@@ -32,83 +40,87 @@ export const sendQuery = async (query) => {
   return data;
 };
 
-export const streamQuery = async ({ query, session_id, onEvent }) => {
-  const response = await fetch(`${resolveApiBase()}/api/query/stream`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query, session_id }),
-  });
+export const streamQuery = async ({ query, session_id, onEvent, onError }) => {
+  try {
+    const response = await fetch(`${resolveApiBase()}/api/query/stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query, session_id }),
+    });
 
-  if (!response.ok || !response.body) {
-    throw new Error(`Streaming request failed with status ${response.status}`);
-  }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) {
-      break;
+    if (!response.ok || !response.body) {
+      throw new Error(`Server error: ${response.status}`);
     }
 
-    buffer += decoder.decode(value, { stream: true });
-    const events = buffer.split("\n\n");
-    buffer = events.pop() || "";
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
 
-    events.forEach((eventChunk) => {
-      const lines = eventChunk.split("\n");
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) {
+        break;
+      }
+
+      buffer += decoder.decode(value, { stream: true });
+      const events = buffer.split("\n\n");
+      buffer = events.pop() || "";
+
+      events.forEach((eventChunk) => {
+        const lines = eventChunk.split("\n");
+        const eventLine = lines.find((line) => line.startsWith("event: "));
+        const dataLine = lines.find((line) => line.startsWith("data: "));
+        if (!eventLine || !dataLine) {
+          return;
+        }
+
+        const type = eventLine.replace("event: ", "").trim();
+        const raw = dataLine.replace("data: ", "");
+        let data;
+        try {
+          data = JSON.parse(raw);
+        } catch {
+          data = raw;
+        }
+
+        if (type === "error") {
+          const message =
+            (typeof data === "object" && data?.detail) ||
+            "Something went wrong. Please try again.";
+          throw new Error(message);
+        }
+
+        onEvent?.({ type, data });
+      });
+    }
+
+    const tail = buffer.trim();
+    if (tail) {
+      const lines = tail.split("\n");
       const eventLine = lines.find((line) => line.startsWith("event: "));
       const dataLine = lines.find((line) => line.startsWith("data: "));
-      if (!eventLine || !dataLine) {
-        return;
+      if (eventLine && dataLine) {
+        const type = eventLine.replace("event: ", "").trim();
+        const raw = dataLine.replace("data: ", "");
+        let data;
+        try {
+          data = JSON.parse(raw);
+        } catch {
+          data = raw;
+        }
+
+        if (type === "error") {
+          const message =
+            (typeof data === "object" && data?.detail) ||
+            "Something went wrong. Please try again.";
+          throw new Error(message);
+        }
+
+        onEvent?.({ type, data });
       }
-
-      const type = eventLine.replace("event: ", "").trim();
-      const raw = dataLine.replace("data: ", "");
-      let data;
-      try {
-        data = JSON.parse(raw);
-      } catch {
-        data = raw;
-      }
-
-      if (type === "error") {
-        const message =
-          (typeof data === "object" && data?.detail) ||
-          "Something went wrong. Please try again.";
-        throw new Error(message);
-      }
-
-      onEvent?.({ type, data });
-    });
-  }
-
-  const tail = buffer.trim();
-  if (tail) {
-    const lines = tail.split("\n");
-    const eventLine = lines.find((line) => line.startsWith("event: "));
-    const dataLine = lines.find((line) => line.startsWith("data: "));
-    if (eventLine && dataLine) {
-      const type = eventLine.replace("event: ", "").trim();
-      const raw = dataLine.replace("data: ", "");
-      let data;
-      try {
-        data = JSON.parse(raw);
-      } catch {
-        data = raw;
-      }
-
-      if (type === "error") {
-        const message =
-          (typeof data === "object" && data?.detail) ||
-          "Something went wrong. Please try again.";
-        throw new Error(message);
-      }
-
-      onEvent?.({ type, data });
     }
+  } catch (err) {
+    onError?.(err.message || "Stream failed. Please try again.");
   }
 };
 

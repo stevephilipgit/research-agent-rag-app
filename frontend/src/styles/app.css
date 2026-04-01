@@ -660,6 +660,16 @@ button:focus {
   color: var(--error);
 }
 
+.warning-banner {
+  margin: 0 32px 12px;
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: color-mix(in srgb, var(--warning) 12%, var(--bg-secondary));
+  border: 1px solid color-mix(in srgb, var(--warning) 28%, var(--border-color));
+  color: var(--warning);
+  font-size: 0.9rem;
+}
+
 .modal-overlay {
   position: fixed;
   inset: 0;
@@ -757,7 +767,8 @@ button:focus {
   }
 
   .input-bar,
-  .error-banner {
+  .error-banner,
+  .warning-banner {
     margin-left: 24px;
     margin-right: 24px;
   }

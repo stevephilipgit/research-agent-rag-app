@@ -27,6 +27,7 @@ function App() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [serverStatus, setServerStatus] = useState("waking"); // "waking" | "ready" | "error"
   const [thinkingLabel, setThinkingLabel] = useState("Thinking.");
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [sessionId, setSessionId] = useState(() => Date.now().toString());
@@ -68,6 +69,21 @@ function App() {
     });
 
     return () => source.close();
+  }, []);
+
+  useEffect(() => {
+    const checkBackend = async () => {
+      try {
+        setServerStatus("waking");
+        await fetch(
+          `${import.meta.env.VITE_API_URL || "https://research-agent-rag-app-1.onrender.com"}/health`
+        );
+        setServerStatus("ready");
+      } catch {
+        setServerStatus("error");
+      }
+    };
+    checkBackend();
   }, []);
 
   useEffect(() => {
@@ -154,6 +170,10 @@ function App() {
             setPendingResponse("");
           }
         },
+        onError: (msg) => {
+          setPendingResponse("");
+          setError(msg || "The assistant could not complete that request.");
+        },
       });
     } catch (err) {
       setPendingResponse("");
@@ -228,6 +248,16 @@ function App() {
           </div>
 
           {error ? <div className="error-banner">{error}</div> : null}
+          {serverStatus === "waking" && (
+            <div className="warning-banner">
+              ⏳ Waking up server, please wait 30–60 seconds...
+            </div>
+          )}
+          {serverStatus === "error" && (
+            <div className="error-banner">
+              ⚠️ Cannot reach server. Please refresh or try again later.
+            </div>
+          )}
           <form className="input-bar" onSubmit={handleSubmit}>
             <button
               className="composer-icon-button"
@@ -253,7 +283,7 @@ function App() {
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder={uploading ? "Uploading documents..." : "Message the assistant"}
-              disabled={loading || uploading}
+              disabled={loading || uploading || serverStatus !== "ready"}
               rows={1}
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !event.shiftKey) {
@@ -266,9 +296,9 @@ function App() {
             <button
               className="send-button"
               type="submit"
-              disabled={loading || uploading || !query.trim()}
+              disabled={loading || uploading || !query.trim() || serverStatus !== "ready"}
             >
-              {loading ? "..." : "Send"}
+              {loading ? "Thinking..." : "Send"}
             </button>
           </form>
         </main>
