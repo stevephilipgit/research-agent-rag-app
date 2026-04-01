@@ -1,10 +1,10 @@
 import sys
+print("STEP 1: Python started", flush=True)
 import os
 import logging
-print("APP STARTING...")
 from pathlib import Path
 
-print("importing settings...")
+print("STEP 2: importing settings...", flush=True)
 from config.settings import REQUESTS_PER_MINUTE, LOG_PATH
 
 # Initial environment loading is handled by settings.py
@@ -14,19 +14,19 @@ from fastapi.responses import JSONResponse
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.errors import RateLimitExceeded
 
-print("importing rate_limiter...")
+print("STEP 3: importing rate_limiter...", flush=True)
 from utils.rate_limiter import limiter
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-print("importing query router...")
+print("STEP 4: importing query router...", flush=True)
 from routes.query import router as query_router
 
-print("importing reranker...")
+print("STEP 5: importing reranker...", flush=True)
 from core.reranker import warmup_reranker
-print("ALL IMPORTS DONE — app starting")
+print("STEP 6: ALL IMPORTS DONE", flush=True)
 
 app = FastAPI(title="RAG Agent Assistant API", version="1.0.0")
 
