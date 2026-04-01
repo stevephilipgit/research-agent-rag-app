@@ -105,28 +105,52 @@ def _format_context(docs: list[Document]) -> str:
     return "\n\n---\n\n".join(parts)
 
 
+def group_by_source(docs: list[Document]) -> list[Document]:
+    """Groups chunks by source and picks the best source (one with most chunks)."""
+    if not docs:
+        return []
+    
+    grouped = defaultdict(list)
+    for doc in docs:
+        source = doc.metadata.get("source") or doc.metadata.get("file_name") or "unknown"
+        grouped[source].append(doc)
+    
+    if not grouped:
+        return docs
+        
+    # pick best source (most chunks)
+    best_source = max(grouped.items(), key=lambda x: len(x[1]))[0]
+    logger.info(f"Source grouping prioritized source: {best_source}")
+    return grouped[best_source]
+
+
 def retrieve_context_with_extensions(query: str, top_k: int = 5) -> str:
     if not query or not query.strip():
         return ""
 
-    if not any([ENABLE_REWRITE, ENABLE_HYBRID, ENABLE_CACHE, ENABLE_COMPRESSION]):
-        docs = _dense_retrieve(query, top_k)
-        return _format_context(docs)
-
     final_query = query
+    is_rewritten = False
+    
     try:
         if ENABLE_REWRITE:
             rewritten_query = rewrite_query(query)
             if rewritten_query and rewritten_query.strip():
                 final_query = rewritten_query.strip()
+                is_rewritten = True
     except Exception as exc:
-        logger.warning("Query rewrite wrapper failed: %s", exc)
-        emit_log("Query Rewrite", "failure", f"Wrapper fallback to original query: {exc}", "query")
+        logger.warning("Query rewrite failed: %s", exc)
         final_query = query
 
     try:
+        # Phase 2: Hybrid Query Fallback (normalized -> raw)
         docs = hybrid_retrieve(final_query, top_k=top_k) if ENABLE_HYBRID else _dense_retrieve(final_query, top_k=top_k)
+        
+        if not docs and is_rewritten:
+            logger.info("Hybrid fallback: No results for normalized query, retrying with raw query.")
+            docs = hybrid_retrieve(query, top_k=top_k) if ENABLE_HYBRID else _dense_retrieve(query, top_k=top_k)
+
         if not docs:
+            # Fix 1 & 10: Specific "not found" return
             return ""
 
         # [NEW] Context Compression
@@ -136,13 +160,20 @@ def retrieve_context_with_extensions(query: str, top_k: int = 5) -> str:
             except Exception as exc:
                 logger.warning(f"Context compression failed: {exc}")
 
+        # Rerank
         ranked_docs = rerank(query, docs, top_k=top_k)
         if not ranked_docs:
             return ""
 
-        return _format_context(ranked_docs)
+        # Fix 3: Source Grouping
+        prioritized_docs = group_by_source(ranked_docs)
+        
+        # Fix 9: Enforce Top-K strictly after rerank/grouping
+        final_docs = prioritized_docs[:3]
+
+        return _format_context(final_docs)
     except Exception as exc:
-        logger.error("Hybrid retrieval wrapper failed: %s", exc, exc_info=True)
-        emit_log("Retrieval", "failure", f"Hybrid wrapper fallback triggered: {exc}", "query")
+        logger.error("Retrieval pipeline failed: %s", exc, exc_info=True)
+        emit_log("Retrieval", "failure", f"Pipeline fallback triggered: {exc}", "query")
         docs = _dense_retrieve(query, top_k)
-        return _format_context(docs)
+        return _format_context(docs[:3])

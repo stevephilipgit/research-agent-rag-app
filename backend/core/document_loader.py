@@ -1,9 +1,9 @@
 """Document loader for the RAG ingestion pipeline - focused on loading and chunking."""
 
 import hashlib
-import logging
 import os
 import re
+import uuid
 from typing import Callable, List, Optional
 
 from langchain_core.documents import Document
@@ -28,6 +28,14 @@ from utils.file_handling import download_file, is_url
 from infra.storage import get_file_url
 
 logger = logging.getLogger(__name__)
+
+def get_file_hash(file_path: str) -> str:
+    """Generates MD5 hash of file content for duplicate prevention."""
+    hash_md5 = hashlib.md5()
+    with open(file_path, "rb") as f:
+        for chunk in iter(lambda: f.read(4096), b""):
+            hash_md5.update(chunk)
+    return hash_md5.hexdigest()
 
 def clean_text(text: str) -> str:
     text = re.sub(r"\s+", " ", text or "")
@@ -147,16 +155,40 @@ def ingest_documents(file_paths: Optional[List[str]] = None, callback: Optional[
         if file_paths is None:
             file_paths = [os.path.join(DOCUMENTS_PATH, f) for f in os.listdir(DOCUMENTS_PATH) if os.path.isfile(os.path.join(DOCUMENTS_PATH, f))]
         
-        docs = load_documents(file_paths, callback=record)
+        # Phase 5: Duplicate Prevention via Hashing
+        registry = load_registry()
+        processed_hashes = {d.get("file_hash") for d in registry if d.get("file_hash")}
+        
+        valid_paths = []
+        for path in file_paths:
+            if not os.path.exists(path):
+                continue
+            
+            f_hash = get_file_hash(path)
+            if f_hash in processed_hashes:
+                record(f"Skipping duplicate file: {os.path.basename(path)} (already indexed)")
+                continue
+            
+            valid_paths.append((path, f_hash))
+
+        if not valid_paths:
+             return {"status": "success", "message": "No new unique documents to ingest.", "steps": steps}
+
+        # Update paths to just the strings for load_documents
+        docs = load_documents([p[0] for p in valid_paths], callback=record)
+        
+        # Attach hashes to doc metadata in documents list to be saved later if needed
+        # Actually registry is managed in rag_service, so we return the hashes
+        
         chunks = chunk_documents(docs, callback=record)
+        record(f"Chunks created: {len(chunks)}")
         
         embeddings_model = get_embeddings(callback=record)
+        record(f"Generating embeddings for {len(chunks)} chunks...")
         
         points = []
         for c in chunks:
-            cid = hashlib.sha256(c.page_content.encode()).hexdigest()
-            # We don't perform a 'contains' check here for performance on cloud, 
-            # Qdrant upsert will handle duplicates/updates
+            cid = str(uuid.uuid4())
             c.metadata["id"] = cid
             points.append({
                 "id": cid,
@@ -170,8 +202,20 @@ def ingest_documents(file_paths: Optional[List[str]] = None, callback: Optional[
         if points:
             upsert_vectors(points)
             
-        record(f"Ingestion complete. Vector count: {get_collection_count()}")
-        return {"status": "success", "vector_count": get_collection_count(), "steps": steps}
+        # Fix 4: Vector DB Validation
+        count = get_collection_count()
+        record(f"VECTOR DB COUNT: {count}")
+        if count == 0:
+            raise RuntimeError("Vector DB is empty after ingestion.")
+
+        record(f"Ingestion complete. Unique files processed: {len(valid_paths)}")
+        return {
+            "status": "success", 
+            "vector_count": count, 
+            "chunks_created": len(chunks),
+            "steps": steps,
+            "file_hashes": {os.path.basename(p[0]): p[1] for p in valid_paths}
+        }
     except Exception as e:
-        record(f"Error: {e}")
+        record(f"Ingestion failed: {e}")
         return {"status": "error", "message": str(e), "steps": steps}

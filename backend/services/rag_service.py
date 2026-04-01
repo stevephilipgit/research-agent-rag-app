@@ -84,7 +84,9 @@ def _ingestion_callback(message: str) -> None:
 
 async def upload_documents(files: List[UploadFile]) -> dict:
     docs = load_registry()
+    processed_hashes = {doc.get("file_hash") for doc in docs if doc.get("file_hash")}
     existing_names = {doc.get("file_name") for doc in docs}
+    
     saved_paths: List[str] = []
     saved_names: List[str] = []
     debug_files: List[dict] = []
@@ -93,18 +95,27 @@ async def upload_documents(files: List[UploadFile]) -> dict:
 
     for file in files:
         file_name = file.filename or "unnamed"
+        content = await file.read()
+        
+        # Phase 5: Duplicate Prevention via Hash Check
+        import hashlib
+        f_hash = hashlib.md5(content).hexdigest()
+        
+        if f_hash in processed_hashes:
+            log_event("File Upload", "failure", f"Duplicate content: {file_name} already exists", "pipeline")
+            continue
+            
         if file_name in existing_names:
-            log_event("File Upload", "failure", f"Duplicate file skipped: {file_name}", "pipeline")
+            log_event("File Upload", "failure", f"Duplicate name: {file_name} already exists", "pipeline")
             continue
 
-        content = await file.read()
         file_size = len(content)
         
-        # [NEW] Security: File Validation
+        # Security: File Validation
         if not validate_file(file_name, file_size):
             log_event("File Upload", "failure", f"Security block: {file_name} failed validation", "pipeline")
             continue
-        # File path joining was removed for cloud storage
+            
         doc_id = str(uuid.uuid4())
 
         try:
@@ -115,16 +126,15 @@ async def upload_documents(files: List[UploadFile]) -> dict:
 
             log_event("File Upload", "success", f"File saved to cloud: {storage_path}", "pipeline")
         except Exception as e:
-            traceback.print_exc()
-            error_msg = f"Cloud storage upload failed: {str(e)}"
-            log_event("File Upload", "failure", error_msg, "pipeline")
-            # We raise so the route catch-all handles it too
-            raise RuntimeError(error_msg) from e
+            logger.error(f"Upload failed: {e}")
+            log_event("File Upload", "failure", "Upload failed", "pipeline")
+            return {"status": "error", "message": "Upload failed", "logs": get_logs()}
 
         save_doc_to_registry(
             {
                 "doc_id": doc_id,
                 "file_name": file_name,
+                "file_hash": f_hash,
                 "storage_path": storage_path,
                 "public_url": public_url,
                 "upload_time": time.time(),
@@ -147,26 +157,25 @@ async def upload_documents(files: List[UploadFile]) -> dict:
         return {
             "status": "success",
             "uploaded_files": [],
-            "documents_loaded": 0,
-            "chunks_created": 0,
-            "vector_count": get_collection_count(),
-            "message": "No new files uploaded.",
-            "steps": ["No new files uploaded."],
+            "message": "No new unique files uploaded.",
             "documents": get_documents(),
             "logs": get_logs(),
-            "debug": {"files": debug_files, "vector_count": get_collection_count()},
         }
 
     try:
         result = ingest_documents(saved_paths, callback=_ingestion_callback)
         if result.get("status") == "success":
-            log_event("File Upload", "success", f"Upload pipeline completed for {len(saved_paths)} file(s)", "pipeline")
+            log_event("File Upload", "success", "Upload & Ingestion completed", "pipeline")
             invalidate_cache()
-            log_event("Cache", "success", "Response cache invalidated after new document ingestion", "pipeline")
         else:
-            log_event("File Upload", "failure", result.get("message", "Ingestion failed"), "pipeline")
+            msg = result.get("message", "Ingestion failed")
+            log_event("File Upload", "failure", msg, "pipeline")
+            return {"status": "error", "message": "Ingestion failed", "logs": get_logs()}
+    except Exception as e:
+        logger.error(f"Ingestion failed: {e}")
+        return {"status": "error", "message": "Ingestion failed", "logs": get_logs()}
     finally:
-        # Cleanup any intermediate temporary files in PROCESSED_PATH
+        # Cleanup
         if os.path.exists(PROCESSED_PATH):
             for fname in os.listdir(PROCESSED_PATH):
                 fpath = os.path.join(PROCESSED_PATH, fname)
@@ -177,20 +186,14 @@ async def upload_documents(files: List[UploadFile]) -> dict:
                     pass
 
     return {
-        "status": result.get("status", "error"),
+        "status": "success",
         "uploaded_files": saved_names,
         "documents_loaded": result.get("documents_loaded", 0),
-        "chunks_created": result.get("chunks_created", 0),
         "vector_count": result.get("vector_count", 0),
-        "message": result.get("message"),
+        "message": "Upload successful",
         "steps": result.get("steps", []),
         "documents": get_documents(),
         "logs": get_logs(),
-        "debug": {
-            "files": debug_files,
-            "vector_count": result.get("vector_count", 0),
-            "saved_paths": saved_paths,
-        },
     }
 
 

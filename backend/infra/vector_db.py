@@ -38,6 +38,9 @@ def upsert_vectors(points: List[dict]):
     """Upserts a list of vector points into Qdrant."""
     init_collection()  # Lazy initialization
     try:
+        if points:
+            print("Sample ID:", points[0]["id"])
+            
         client.upsert(
             collection_name=COLLECTION_NAME,
             points=[
@@ -106,6 +109,18 @@ def get_collection_count() -> int:
     except Exception as exc:
         logger.error(f"Failed to get Qdrant collection count: {exc}")
         return 0
+
+def reset_collection():
+    """Deletes and recreates the Qdrant collection."""
+    try:
+        logger.info(f"Deleting collection '{COLLECTION_NAME}'")
+        client.delete_collection(COLLECTION_NAME)
+        init_collection()
+        logger.info(f"Collection '{COLLECTION_NAME}' reset successfully")
+    except Exception as exc:
+        logger.error(f"Failed to reset Qdrant collection: {exc}")
+        # If it doesn't exist, init_collection will create it anyway
+        init_collection()
 
 # Removed top-level init call to prevent startup blocking.
 # Operations will lazy-initialize the collection as needed.

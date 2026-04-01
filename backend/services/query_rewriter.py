@@ -1,67 +1,27 @@
 import logging
 import re
 
-from langchain_core.messages import HumanMessage, SystemMessage
-from config import ENABLE_REWRITE
-from core.telemetry import emit_log
-
 logger = logging.getLogger(__name__)
 
-_rewriter_llm = None
-
-_SYSTEM_PROMPT = """Rewrite the user's question for document retrieval.
-
-Rules:
-- Preserve meaning.
-- Keep it short and search-oriented.
-- Include key entities and technical terms.
-- Return only the rewritten query text.
-"""
-
-
-def _get_rewriter_llm():
-    global _rewriter_llm
-    if _rewriter_llm is None:
-        from config.llm import get_llm
-        _rewriter_llm = get_llm()
-    return _rewriter_llm
-
-
-def _clean_fallback(query: str) -> str:
+def normalize_query(query: str) -> str:
+    """Fast query normalization by lowercasing and removing noise words."""
+    if not query:
+        return ""
+    
     query = query.lower().strip()
-    filler = ["give", "explain", "tell", "describe", "what is", "what are", "please", "define"]
-    for f in filler:
-        query = query.replace(f, "")
-    return re.sub(r"\s+", " ", query).strip()
-
-
-def rewrite_query(query: str) -> str:
-    if not ENABLE_REWRITE or not query or not query.strip():
-        return query
-
-    try:
-        llm = _get_rewriter_llm()
-        if llm is not None:
-            response = llm.invoke(
-                [
-                    SystemMessage(content=_SYSTEM_PROMPT),
-                    HumanMessage(content=query.strip()),
-                ]
-            )
-            improved_query = str(getattr(response, "content", "") or "").strip()
-            if improved_query:
-                emit_log("Query Rewrite", "success", "Query rewritten", "query")
-                return improved_query
-    except Exception as exc:
-        logger.warning("LLM query rewrite failed: %s", exc)
-        emit_log("Query Rewrite", "failure", f"Rewrite failed, using fallback: {exc}", "query")
-
-    try:
-        improved_query = _clean_fallback(query)
-        if improved_query:
-            emit_log("Query Rewrite", "success", "Query rewritten", "query")
-            return improved_query
-    except Exception as exc:
-        logger.warning("Legacy query rewrite failed: %s", exc)
-
+    
+    # Noise words removal
+    noise_words = ["please", "can you", "could you", "tell me", "explain", "give me", "find", "search for", "about", "the"]
+    for word in noise_words:
+        # Use regex to match whole words only
+        query = re.sub(rf"\b{word}\b", "", query)
+    
+    # Remove extra spaces
+    query = re.sub(r"\s+", " ", query).strip()
     return query
+
+def rewrite_query(query: str, history=None) -> str:
+    """Fast normalization first."""
+    normalized = normalize_query(query)
+    logger.info(f"Query normalized: '{query}' -> '{normalized}'")
+    return normalized

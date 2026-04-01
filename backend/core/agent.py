@@ -40,27 +40,16 @@ class AgentState(TypedDict):
     messages: Annotated[list[BaseMessage], operator.add]
 
 
-SYSTEM_PROMPT = """You are a rag assistant with access to tools.
+SYSTEM_PROMPT = """You are a document-based RAG assistant.
 
 Your job:
-1. When a user asks a question, call the appropriate tool to retrieve information.
-   - Use document_search for questions about uploaded documents.
-   - Use web_search_tool for current events or topics not in documents.
-   - Use read_url when a specific URL is provided.
+1. When a user asks a question, call 'document_search' to retrieve information FROM UPLOADED DOCUMENTS ONLY.
+2. After the tool returns results, READ them carefully. They are your ONLY source of truth.
+3. Synthesize a clear answer ONLY from these results.
+4. Always cite your sources: [filename, page X]
+5. If 'document_search' returns no relevant content, say: "Answer not found in uploaded documents."
 
-2. After the tool returns results, READ the tool output carefully.
-   The tool output IS your source of truth. Synthesize a clear, complete answer
-   from it.
-
-3. Always cite your sources at the end of your answer in this format:
-   Sources: [filename, page X] or [URL]
-
-4. If the tool returns no relevant content, say:
-   "The information is not available in the provided documents."
-
-IMPORTANT: Never say information is unavailable before calling a tool first.
-After calling a tool and receiving results, always synthesize an answer from
-those results - do not say "not available" if the tool returned content.
+IMPORTANT: Never use external knowledge or invent facts. If the information isn't in the context, say it's not found.
 """
 
 SYNTHESIS_PROMPT = """You are a document-based assistant.
@@ -94,8 +83,20 @@ def agent_node(state: AgentState):
     if not any(isinstance(message, SystemMessage) for message in messages):
         messages = [SystemMessage(content=SYSTEM_PROMPT)] + messages
 
-    # Apply safe_llm_call to direct node invocation
-    response = safe_llm_call(llm_with_tools, messages, retries=1)
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError
+    
+    # Fix 6: Timeout Safety (10s)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(safe_llm_call, llm_with_tools, messages, retries=1)
+        try:
+            response = future.result(timeout=10)
+        except TimeoutError:
+            emit_log("LLM", "failure", "Request timed out after 10s", "query")
+            return {"messages": [AIMessage(content="Request timed out. Please try again.")]}
+        except Exception as e:
+            emit_log("LLM", "failure", f"LLM error: {str(e)}", "query")
+            return {"messages": [AIMessage(content="LLM execution failed.")]}
+
     if not response or not getattr(response, "content", None) and not getattr(response, "tool_calls", None):
          return {"messages": [AIMessage(content="LLM execution failed.")]}
     return {"messages": [response]}
@@ -136,6 +137,24 @@ def clean_context(text: str) -> str:
     text = re.sub(r"\s+", " ", text)
     text = re.sub(r"([a-z])([A-Z])", r"\1 \2", text)
     return text.strip()
+
+
+def is_valid_answer(answer: str, context: str) -> bool:
+    """Checks if the answer has meaningful overlap with the source context."""
+    if not answer or len(answer) < 10:
+        return False
+    if not context:
+        return False
+    
+    # Simple word overlap check
+    answer_words = set(re.findall(r"\w+", answer.lower()))
+    context_words = set(re.findall(r"\w+", context.lower()))
+    
+    # Filter common stop words for better validation
+    stop_words = {"the", "a", "an", "is", "are", "and", "or", "in", "on", "at", "to", "for", "with", "this", "that"}
+    overlap = (answer_words & context_words) - stop_words
+    
+    return len(overlap) > 3
 
 
 def _dedupe_citations(citations: list[dict]) -> list[dict]:
@@ -302,20 +321,25 @@ def run_research_agent(query: str, history_messages=None, session_id: str = "def
                 
             final_answer = str(getattr(final_response, "content", "") or "").strip()
             
-            # [NEW] Grounding Validator
+            # Fix 8: Safe Response Validation
+            if not is_valid_answer(final_answer, tool_context):
+                emit_log("Grounding", "failure", "Answer failed overlap validation", "query")
+                final_answer = "Answer not found in uploaded documents."
+
+            # [NEW] Grounding Validator (optional/extra check)
             if ENABLE_VALIDATION:
                 # Create dummy doc list for validator
                 from langchain_core.documents import Document as LC_Document
                 v_docs = [LC_Document(page_content=tool_context)]
                 if not validate_answer(final_answer, v_docs):
-                    final_answer = "The generated answer could not be verified against the provided documents. Please try a different query."
+                    final_answer = "The generated answer could not be verified against the provided documents. [Grounding check failed]"
 
         except Exception as exc:
             logger.error(f"Synthesis failed: {exc}", exc_info=True)
             emit_log("Agent Execution", "failure", f"Synthesis failed: {exc}", "query")
 
-    if not final_answer or len(final_answer.strip()) < 20:
-        final_answer = "The information is not available in the provided documents."
+    if not final_answer or len(final_answer.strip()) < 10:
+        final_answer = "Answer not found in uploaded documents."
 
     # [NEW] Save Memory
     if ENABLE_MEMORY:
@@ -416,22 +440,28 @@ def run_research_agent_stream(query: str, history_messages=None, session_id: str
                 return
             final_answer = "".join(streamed_chunks).strip()
 
+            # Fix 8: Safe Response Validation for streaming
+            if not is_valid_answer(final_answer, tool_context):
+                emit_log("Grounding", "failure", "Streamed answer failed overlap validation", "query")
+                # We can't really "undo" the stream, but we can append a warning or override the final_answer for the record
+                final_answer = "Answer not found in uploaded documents."
+
             # [NEW] Grounding Validator
             if ENABLE_VALIDATION:
                 from langchain_core.documents import Document as LC_Document
                 v_docs = [LC_Document(page_content=tool_context)]
                 if not validate_answer(final_answer, v_docs):
                     emit_log("Grounding", "failure", "Generated answer rejected by grounding validator.", "query")
-                    final_answer = "The generated answer could not be verified against documented facts. [Grounding rejection]"
-                else:
-                    emit_log("Grounding", "success", "Generated answer verified by grounding validator.", "query")
-                    yield {"type": "token", "data": "\n\n(Note: The answer above was rejected by the grounding validator for inaccuracy. Original response discarded.)"}
+                    final_answer = "Answer not found in uploaded documents. [Grounding check failed]"
 
         elif final_answer:
+            # Check direct answer too
+            if not is_valid_answer(final_answer, tool_context):
+                 final_answer = "Answer not found in uploaded documents."
             for part in [final_answer]:
                 yield {"type": "token", "data": part}
         else:
-            fallback = "The information is not available in the provided documents."
+            fallback = "Answer not found in uploaded documents."
             yield {"type": "token", "data": fallback}
             final_answer = fallback
     except Exception as exc:
