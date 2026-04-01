@@ -3,6 +3,7 @@ import os
 import sys
 import time
 import uuid
+import traceback
 from pathlib import Path
 from typing import Iterator, List
 
@@ -106,12 +107,19 @@ async def upload_documents(files: List[UploadFile]) -> dict:
         # File path joining was removed for cloud storage
         doc_id = str(uuid.uuid4())
 
-        log_event("File Upload", "in_progress", f"Uploading {file_name} to cloud storage...", "pipeline")
-        storage_path = upload_file(content, file_name)
-        public_url = get_file_url(storage_path)
-        file.file.close()
+        try:
+            log_event("File Upload", "in_progress", f"Uploading {file_name} to cloud storage...", "pipeline")
+            storage_path = upload_file(content, file_name)
+            public_url = get_file_url(storage_path)
+            file.file.close()
 
-        log_event("File Upload", "success", f"File saved to cloud: {storage_path}", "pipeline")
+            log_event("File Upload", "success", f"File saved to cloud: {storage_path}", "pipeline")
+        except Exception as e:
+            traceback.print_exc()
+            error_msg = f"Cloud storage upload failed: {str(e)}"
+            log_event("File Upload", "failure", error_msg, "pipeline")
+            # We raise so the route catch-all handles it too
+            raise RuntimeError(error_msg) from e
 
         save_doc_to_registry(
             {

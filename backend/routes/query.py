@@ -1,4 +1,5 @@
 import json
+import traceback
 from typing import List
 
 from fastapi import APIRouter, File, HTTPException, UploadFile, Request
@@ -60,6 +61,7 @@ async def upload_endpoint(request: Request, files: List[UploadFile] = File(...))
     try:
         return await upload_documents(files)
     except Exception as exc:
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
