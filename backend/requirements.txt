@@ -8,6 +8,7 @@ langchain-openai
 qdrant-client>=1.7.0
 python-dotenv
 sentence-transformers
+torch==2.1.0+cpu --extra-index-url https://download.pytorch.org/whl/cpu
 slowapi
 tenacity
 pydantic
