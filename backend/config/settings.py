@@ -8,9 +8,8 @@ from dotenv import load_dotenv
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
 
-# Explicitly load from project root .env (two levels up from backend/config/)
-_ROOT_ENV = Path(__file__).resolve().parents[2] / ".env"
-load_dotenv(dotenv_path=_ROOT_ENV)
+# Safe fallback
+load_dotenv()
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 
@@ -23,11 +22,11 @@ QDRANT_URL = os.getenv("QDRANT_URL")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
 
 if not GROQ_API_KEY:
-    raise ValueError("Missing GROQ_API_KEY. Please ensure it is set in your .env file.")
+    print("WARNING: Missing GROQ_API_KEY. Set it in .env or Render environment tab.")
 if not TAVILY_API_KEY:
-    raise ValueError("Missing TAVILY_API_KEY. Please ensure it is set in your .env file.")
+    print("WARNING: Missing TAVILY_API_KEY. Set it in .env or Render environment tab.")
 if not QDRANT_URL or not QDRANT_API_KEY:
-    raise ValueError("Missing QDRANT credentials. Please check your .env file.")
+    print("WARNING: Missing QDRANT credentials. Set them in .env or Render environment tab.")
 
 # ===== LLM CONFIG =====
 DEFAULT_MODEL = "llama-3.1-8b-instant"
