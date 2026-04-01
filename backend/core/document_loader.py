@@ -1,6 +1,7 @@
 """Document loader for the RAG ingestion pipeline - focused on loading and chunking."""
 
 import hashlib
+import logging
 import os
 import re
 import uuid
