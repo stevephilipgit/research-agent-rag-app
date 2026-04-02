@@ -79,6 +79,48 @@ research-assistant/
 └── render.yaml           # Deployment & Production manifest
 ```
 
+## 🛠️ Tech Stack: High-Performance Infrastructure
+
+### Frontend & Dashboard
+*   **Vite/React**: Ultra-fast core with component-based interactivity.
+*   **Tailwind CSS**: Modern, utility-first styling for premium design aesthetics.
+*   **Lucide React**: Vector icons for clear visual cues and status indicators.
+*   **Netlify**: Distributed deployment for low-latency frontend delivery.
+
+### Backend Orchestration
+*   **FastAPI (Python 3.10-3.12)**: Asynchronous API Layer for high-concurrency handling.
+*   **LangGraph**: State-driven agentic reasoning (State Machine RAG).
+*   **Groq (Llama 3.1 8B)**: Near real-time inference with ultra-low token latency.
+*   **SlowAPI**: Industrial-grade rate limiting (10-15 requests/minute).
+
+### Vector Intelligence & Knowledge Base
+*   **Qdrant Cloud**: Managed vector database with advanced payload filtering and indexing.
+*   **Hybrid Search**: Combination of dense semantic and keyword-based retrieval.
+*   **LocalHashEmbeddings**: Custom deterministic hashing-based embeddings for ultra-fast processing.
+
+### Storage & Resilience
+*   **Supabase Storage**: Robust cloud storage for persisting user-uploaded assets.
+*   **Redis (Optional)**: High-speed caching for embeddings and query responses.
+*   **JSON Registry**: Local persistent metadata store for file-level tracking.
+
+---
+
+## 📋 Requirements & Environment Variables
+
+Create a `.env` file in the **`backend/`** directory with the following variables:
+
+### 🔑 Essential API Keys
+*   `GROQ_API_KEY`: `your_groq_key_here`
+*   `TAVILY_API_KEY`: `your_tavily_key_here`
+*   `QDRANT_URL`: `your_qdrant_cloud_url_here`
+*   `QDRANT_API_KEY`: `your_qdrant_api_key_here`
+*   `SUPABASE_URL`: `your_supabase_project_url_here`
+*   `SUPABASE_KEY`: `your_supabase_anon_key_here`
+*   `HF_TOKEN`: `your_huggingface_read_token_here` (for reranker model access)
+
+### ⚙️ Feature Flags (default: true)
+*   `ENABLE_CACHE`, `ENABLE_VALIDATION`, `ENABLE_COMPRESSION`, `ENABLE_REWRITE`, `ENABLE_HYBRID`, `ENABLE_RETRY`, `ENABLE_TOOL_GUARD`
+
 ---
 
 ## 🚀 Setup & Installation
