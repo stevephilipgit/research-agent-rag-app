@@ -28,6 +28,16 @@ services:
         value: /tmp/hf_cache
       - key: HF_HOME
         value: /tmp/hf_home
+      - key: ENABLE_RERANKER
+        value: "false"
+      - key: OMP_NUM_THREADS
+        value: "1"
+      - key: MKL_NUM_THREADS
+        value: "1"
+      - key: TOKENIZERS_PARALLELISM
+        value: "false"
+      - key: PYTORCH_NO_CUDA_MEMORY_CACHING
+        value: "1"
 
   - type: static
     name: research-assistant-frontend

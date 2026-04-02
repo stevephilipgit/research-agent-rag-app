@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 # Limit native threads to prevent OMP/MKL related crashes in high-concurrency environments
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 # Safe fallback
 load_dotenv()
@@ -59,6 +60,7 @@ def _env_flag(name: str, default: str = "true") -> bool:
     return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "on"}
 
 ENABLE_CACHE = _env_flag("ENABLE_CACHE", "true")
+ENABLE_RERANKER = _env_flag("ENABLE_RERANKER", "false")  # disabled by default on free tier
 ENABLE_SECURITY = _env_flag("ENABLE_SECURITY", "true")
 ENABLE_VALIDATION = _env_flag("ENABLE_VALIDATION", "true")
 ENABLE_MEMORY = _env_flag("ENABLE_MEMORY", "true")

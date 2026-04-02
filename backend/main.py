@@ -1,5 +1,6 @@
 import sys
 import os
+import psutil
 import logging
 from pathlib import Path
 
@@ -64,6 +65,14 @@ app.include_router(query_router)
 
 @app.on_event("startup")
 async def startup():
+    logger = logging.getLogger(__name__)
+    try:
+        process = psutil.Process(os.getpid())
+        mem = process.memory_info().rss / 1024 / 1024
+        print(f"Memory usage at startup: {mem:.1f}MB")
+    except Exception as e:
+        print(f"Memory check missing/failed: {e}")
+
     if not scheduler.running:
         scheduler.start()
         print("APScheduler started: Session cleanup job registered.")

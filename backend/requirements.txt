@@ -25,3 +25,4 @@ unstructured
 supabase
 upstash-redis
 apscheduler
+psutil

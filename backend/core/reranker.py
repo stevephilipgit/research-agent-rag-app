@@ -4,6 +4,7 @@ import threading
 import time
 
 from core.telemetry import emit_log
+from config.settings import ENABLE_RERANKER
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +18,9 @@ RERANKER_CPU_THREADS = int(os.getenv("RERANKER_CPU_THREADS", "4"))
 
 
 def get_reranker_model():
+    if not ENABLE_RERANKER:
+        logger.info("Reranker disabled via ENABLE_RERANKER=false")
+        return None
     global _reranker_model
     if _reranker_model is None:
         with _reranker_lock:
