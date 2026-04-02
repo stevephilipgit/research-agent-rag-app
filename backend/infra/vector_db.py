@@ -1,8 +1,7 @@
 import os
 import logging
 from typing import List, Optional
-from qdrant_client import QdrantClient
-from qdrant_client.http import models
+from qdrant_client import QdrantClient, models
 from qdrant_client.models import NamedVector, ScoredPoint
 from config.settings import QDRANT_URL, QDRANT_API_KEY, EMBEDDING_DIMENSION
 
@@ -12,6 +11,10 @@ logger = logging.getLogger(__name__)
 client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
 
 COLLECTION_NAME = "documents"
+
+def get_client() -> QdrantClient:
+    """Returns the Qdrant client instance."""
+    return client
 
 def init_collection():
     """Initializes the Qdrant collection for semantic search."""
@@ -100,6 +103,29 @@ def delete_vectors_by_doc_id(doc_id: str):
     except Exception as exc:
         logger.error(f"Qdrant deletion failed for doc_id {doc_id}: {exc}")
         raise exc
+
+def is_indexed_in_qdrant(file_name: str) -> bool:
+    """Check if a document is already indexed in Qdrant by searching for its filename in payload."""
+    try:
+        client = get_client()
+        results = client.scroll(
+            collection_name=COLLECTION_NAME,
+            scroll_filter=models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="source",
+                        match=models.MatchText(text=file_name),
+                    )
+                ]
+            ),
+            limit=1,
+            with_payload=False,
+            with_vectors=False,
+        )[0]
+        return len(results) > 0
+    except Exception as e:
+        logger.warning(f"is_indexed_in_qdrant check failed for {file_name}: {e}")
+        return False
 
 def get_collection_count() -> int:
     """Returns the total number of points in the Qdrant collection."""
