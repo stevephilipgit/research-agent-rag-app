@@ -98,8 +98,9 @@ def load_documents(
             docs = loader.load()
             
             doc_id = registry_by_name.get(os.path.basename(file_path))
+            original_name = os.path.basename(path)
             for doc in docs:
-                doc.metadata["file_name"] = os.path.basename(file_path)
+                doc.metadata["file_name"] = original_name
                 if doc_id: doc.metadata["doc_id"] = doc_id
                 doc.page_content = clean_text(doc.page_content)
             documents.extend(docs)
@@ -156,6 +157,9 @@ def ingest_documents(file_paths: Optional[List[str]] = None, callback: Optional[
         if file_paths is None:
             file_paths = [os.path.join(DOCUMENTS_PATH, f) for f in os.listdir(DOCUMENTS_PATH) if os.path.isfile(os.path.join(DOCUMENTS_PATH, f))]
         
+        # De-duplicate file paths while preserving order
+        file_paths = list(dict.fromkeys(file_paths))
+        
         # Phase 5: Duplicate Prevention via Hashing
         registry = load_registry()
         processed_hashes = {d.get("file_hash") for d in registry if d.get("file_hash")}
@@ -195,6 +199,10 @@ def ingest_documents(file_paths: Optional[List[str]] = None, callback: Optional[
         # Actually registry is managed in rag_service, so we return the hashes
         
         chunks = chunk_documents(docs, callback=record)
+        for chunk in chunks:
+            original_name = chunk.metadata.get("file_name") or "Unknown"
+            chunk.metadata["source"] = original_name
+            chunk.metadata["display_name"] = original_name
         record(f"Chunks created: {len(chunks)}")
         
         embeddings_model = get_embeddings(callback=record)

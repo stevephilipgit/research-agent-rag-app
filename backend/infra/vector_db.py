@@ -16,42 +16,46 @@ def get_client() -> QdrantClient:
     """Returns the Qdrant client instance."""
     return client
 
-def init_collection():
-    """Initializes the Qdrant collection for semantic search."""
+def ensure_collection_exists():
+    """Create the Qdrant collection if it doesn't exist."""
     try:
         collections = client.get_collections().collections
         exists = any(c.name == COLLECTION_NAME for c in collections)
         
         if not exists:
             logger.info(f"Creating collection '{COLLECTION_NAME}' in Qdrant")
+            from qdrant_client.models import Distance, VectorParams
             client.create_collection(
                 collection_name=COLLECTION_NAME,
-                vectors_config=models.VectorParams(
+                vectors_config=VectorParams(
                     size=EMBEDDING_DIMENSION, 
-                    distance=models.Distance.COSINE
+                    distance=Distance.COSINE
                 )
             )
+            logger.info(f"Created Qdrant collection '{COLLECTION_NAME}'")
         else:
-            logger.info(f"Collection '{COLLECTION_NAME}' already exists in Qdrant")
+            logger.debug(f"Collection '{COLLECTION_NAME}' already exists in Qdrant")
     except Exception as exc:
-        logger.error(f"Failed to initialize Qdrant collection: {exc}")
-        # We don't raise here as it might be a temporary connection issue
-        pass
+        logger.error(f"Failed to ensure Qdrant collection exists: {exc}")
+        raise exc
 
 def upsert_vectors(points: List[dict]):
     """Upserts a list of vector points into Qdrant."""
-    init_collection()  # Lazy initialization
+    ensure_collection_exists()
     try:
-        if points:
-            print("Sample ID:", points[0]["id"])
-            
         client.upsert(
             collection_name=COLLECTION_NAME,
             points=[
                 models.PointStruct(
                     id=p["id"],
                     vector=p["vector"],
-                    payload=p["payload"]
+                    payload={
+                        "source": p["payload"].get("display_name") or p["payload"].get("source") or p["payload"].get("file_name", "Unknown"),
+                        "page": p["payload"].get("page", "N/A"),
+                        "text": p["payload"].get("page_content") or p["payload"].get("text", ""),
+                        # Preserve any other metadata
+                        **{k: v for k, v in p["payload"].items() if k not in ["source", "page", "text", "page_content"]}
+                    }
                 ) for p in points
             ]
         )
@@ -62,7 +66,7 @@ def upsert_vectors(points: List[dict]):
 
 def search_vectors(query_vector: List[float], limit: int = 5) -> List[dict]:
     """Performs semantic search in Qdrant based on a query vector."""
-    init_collection()  # Lazy initialization
+    ensure_collection_exists()
     try:
         results = client.query_points(
             collection_name=COLLECTION_NAME,
@@ -76,7 +80,7 @@ def search_vectors(query_vector: List[float], limit: int = 5) -> List[dict]:
                 "id": r.id,
                 "score": r.score,
                 "payload": r.payload,
-                "content": r.payload.get("page_content", "")
+                "content": r.payload.get("text") or r.payload.get("page_content", "")
             } for r in results
         ]
     except Exception as exc:
@@ -106,6 +110,7 @@ def delete_vectors_by_doc_id(doc_id: str):
 
 def is_indexed_in_qdrant(file_name: str) -> bool:
     """Check if a document is already indexed in Qdrant by searching for its filename in payload."""
+    ensure_collection_exists()
     try:
         client = get_client()
         results = client.scroll(
@@ -129,7 +134,7 @@ def is_indexed_in_qdrant(file_name: str) -> bool:
 
 def get_collection_count() -> int:
     """Returns the total number of points in the Qdrant collection."""
-    init_collection()  # Lazy initialization
+    ensure_collection_exists()
     try:
         res = client.get_collection(COLLECTION_NAME)
         return res.points_count
@@ -142,12 +147,12 @@ def reset_collection():
     try:
         logger.info(f"Deleting collection '{COLLECTION_NAME}'")
         client.delete_collection(COLLECTION_NAME)
-        init_collection()
+        ensure_collection_exists()
         logger.info(f"Collection '{COLLECTION_NAME}' reset successfully")
     except Exception as exc:
         logger.error(f"Failed to reset Qdrant collection: {exc}")
-        # If it doesn't exist, init_collection will create it anyway
-        init_collection()
+        # If it doesn't exist, ensure_collection_exists will create it anyway
+        ensure_collection_exists()
 
 # Removed top-level init call to prevent startup blocking.
 # Operations will lazy-initialize the collection as needed.

@@ -1,5 +1,6 @@
 import logging
 import math
+import os
 import re
 from collections import Counter, defaultdict
 
@@ -98,7 +99,9 @@ def hybrid_retrieve(query: str, top_k: int = 5) -> list[Document]:
 def _format_context(docs: list[Document]) -> str:
     parts = []
     for doc in docs:
-        source = doc.metadata.get("source") or doc.metadata.get("file_name") or "unknown"
+        source = doc.metadata.get("display_name") or doc.metadata.get("source") or doc.metadata.get("file_name") or "unknown"
+        # Ensure only basename is displayed
+        source = os.path.basename(source)
         page = doc.metadata.get("page", "N/A")
         section = doc.metadata.get("section", "")
         parts.append(f"[Source: {source}, Page: {page}, Section: {section}]\n{doc.page_content}")
@@ -112,7 +115,8 @@ def group_by_source(docs: list[Document]) -> list[Document]:
     
     grouped = defaultdict(list)
     for doc in docs:
-        source = doc.metadata.get("source") or doc.metadata.get("file_name") or "unknown"
+        source = doc.metadata.get("display_name") or doc.metadata.get("source") or doc.metadata.get("file_name") or "unknown"
+        source = os.path.basename(source)
         grouped[source].append(doc)
     
     if not grouped:
