@@ -64,6 +64,7 @@ def _pick_loader(file_path: str):
 
 def load_documents(
     file_paths: List[str],
+    session_id: str = "default",
     callback: Optional[Callable[[str], None]] = None,
 ) -> List[Document]:
     registry = load_registry()
@@ -149,7 +150,7 @@ def delete_document(doc_id: str):
     logger.info(f"Removed doc_id {doc_id} from registry")
     
 
-def ingest_documents(file_paths: Optional[List[str]] = None, file_names: Optional[List[str]] = None, callback: Optional[Callable[[str], None]] = None) -> dict:
+def ingest_documents(file_paths: Optional[List[str]] = None, file_names: Optional[List[str]] = None, session_id: str = "default", callback: Optional[Callable[[str], None]] = None) -> dict:
     steps = []
     def record(m): steps.append(m); _emit_step(callback, m)
     
@@ -192,8 +193,8 @@ def ingest_documents(file_paths: Optional[List[str]] = None, file_names: Optiona
                 f_hash = get_file_hash(path)
             
             # CORRECT — only skip if already in BOTH registry AND Qdrant
-            if f_hash in processed_hashes and is_indexed_in_qdrant(file_name):
-                record(f"Skipping {file_name} — already indexed in Qdrant")
+            if f_hash in processed_hashes and is_indexed_in_qdrant(file_name, session_id=session_id):
+                record(f"Skipping {file_name} — already indexed for this session")
                 continue
             
             record(f"Queueing for ingestion: {file_name}")
@@ -203,7 +204,7 @@ def ingest_documents(file_paths: Optional[List[str]] = None, file_names: Optiona
              return {"status": "success", "message": "No new unique documents to ingest.", "steps": steps}
 
         # Update paths to just the strings for load_documents
-        docs = load_documents([p[0] for p in valid_paths], callback=record)
+        docs = load_documents([p[0] for p in valid_paths], session_id=session_id, callback=record)
         
         # Attach hashes to doc metadata in documents list to be saved later if needed
         # Actually registry is managed in rag_service, so we return the hashes
@@ -232,7 +233,7 @@ def ingest_documents(file_paths: Optional[List[str]] = None, file_names: Optiona
             })
         
         if points:
-            upsert_vectors(points)
+            upsert_vectors(points, session_id=session_id)
             
         # Fix 4: Vector DB Validation
         count = get_collection_count()

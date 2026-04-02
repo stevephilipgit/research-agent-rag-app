@@ -3,11 +3,25 @@ import axios from "axios";
 const BASE_URL =
   (import.meta.env.VITE_API_URL || "https://research-agent-rag-app-1.onrender.com").replace(/\/$/, "");
 
+const getSessionId = () => {
+  let sessionId = sessionStorage.getItem("rag_session_id");
+  if (!sessionId) {
+    sessionId = crypto.randomUUID();
+    sessionStorage.setItem("rag_session_id", sessionId);
+  }
+  return sessionId;
+};
+
 const api = axios.create({
   baseURL: BASE_URL,
 });
 
-axios.interceptors.response.use(
+api.interceptors.request.use((config) => {
+  config.headers["X-Session-ID"] = getSessionId();
+  return config;
+});
+
+api.interceptors.response.use(
   (response) => response,
   (error) => {
     const message =
@@ -40,12 +54,15 @@ export const sendQuery = async (query) => {
   return data;
 };
 
-export const streamQuery = async ({ query, session_id, onEvent, onError }) => {
+export const streamQuery = async ({ query, onEvent, onError }) => {
   try {
     const response = await fetch(`${resolveApiBase()}/api/query/stream`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query, session_id }),
+      headers: { 
+        "Content-Type": "application/json",
+        "X-Session-ID": getSessionId(),
+      },
+      body: JSON.stringify({ query }),
     });
 
     if (!response.ok || !response.body) {
@@ -125,7 +142,7 @@ export const streamQuery = async ({ query, session_id, onEvent, onError }) => {
 };
 
 export const subscribeToLogs = ({ onSnapshot, onLog, onError }) => {
-  const source = new EventSource(`${resolveApiBase()}/api/logs/stream`);
+  const source = new EventSource(`${resolveApiBase()}/api/logs/stream?session_id=${getSessionId()}`);
 
   source.addEventListener("snapshot", (event) => {
     onSnapshot?.(JSON.parse(event.data));
@@ -153,5 +170,10 @@ export const uploadFiles = async (files) => {
 
 export const deleteDocument = async (docId) => {
   const { data } = await api.delete(`/api/documents/${docId}`);
+  return data;
+};
+
+export const clearSession = async () => {
+  const { data } = await api.delete("/api/session");
   return data;
 };

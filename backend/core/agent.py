@@ -169,20 +169,21 @@ def _dedupe_citations(citations: list[dict]) -> list[dict]:
     return deduped
 
 
-def _collect_agent_execution(query: str, history_messages=None) -> dict:
+def _collect_agent_execution(query: str, history_messages=None, session_id: str = "default") -> dict:
     agent = build_agent()
 
     if history_messages is None:
         history_messages = []
 
     initial_state = {"messages": [*history_messages, HumanMessage(content=query)]}
+    config = {"configurable": {"session_id": session_id}}
 
     tool_context = ""
     rich_steps = []
     citations = []
     direct_answer = ""
 
-    for step in agent.stream(initial_state):
+    for step in agent.stream(initial_state, config=config):
         if "tools" in step:
             for message in step["tools"]["messages"]:
                 if not isinstance(message, ToolMessage):
@@ -275,11 +276,11 @@ def run_research_agent(query: str, history_messages=None, session_id: str = "def
 
     # [NEW] Cache check
     if ENABLE_CACHE:
-        cached = get_cache(query)
+        cached = get_cache(query, session_id=session_id)
         if cached:
             return cached
 
-    cached_static = get_cached_response(query)
+    cached_static = get_cached_response(query, session_id=session_id)
     if cached_static:
         return {
             "answer": cached_static,
@@ -288,7 +289,7 @@ def run_research_agent(query: str, history_messages=None, session_id: str = "def
         }
 
     try:
-        collected = _collect_agent_execution(query, history_messages)
+        collected = _collect_agent_execution(query, history_messages, session_id=session_id)
     except Exception as exc:
         logger.error(f"Agent stream error: {exc}", exc_info=True)
         emit_log("Agent Execution", "failure", f"Agent stream error: {exc}", "query")
@@ -345,7 +346,7 @@ def run_research_agent(query: str, history_messages=None, session_id: str = "def
     if ENABLE_MEMORY:
         save_memory(session_id, query, final_answer)
 
-    set_cached_response(query, final_answer)
+    set_cached_response(query, final_answer, session_id=session_id)
     emit_log(
         "Agent Execution",
         "success",
@@ -360,7 +361,7 @@ def run_research_agent(query: str, history_messages=None, session_id: str = "def
         "citations": collected["citations"],
     }
     if ENABLE_CACHE:
-        set_cache(query, res)
+        set_cache(query, res, session_id=session_id)
 
     return res
 
@@ -381,13 +382,13 @@ def run_research_agent_stream(query: str, history_messages=None, session_id: str
 
     # [NEW] Cache check
     if ENABLE_CACHE:
-        cached = get_cache(query)
+        cached = get_cache(query, session_id=session_id)
         if cached:
             yield {"type": "token", "data": cached.get("answer", "")}
             yield {"type": "done", "data": cached}
             return
 
-    cached_static = get_cached_response(query)
+    cached_static = get_cached_response(query, session_id=session_id)
     if cached_static:
         yield {"type": "token", "data": cached_static}
         yield {
@@ -401,7 +402,7 @@ def run_research_agent_stream(query: str, history_messages=None, session_id: str
         return
 
     try:
-        collected = _collect_agent_execution(query, history_messages)
+        collected = _collect_agent_execution(query, history_messages, session_id=session_id)
     except Exception as exc:
         logger.error(f"Agent stream error: {exc}", exc_info=True)
         emit_log("Agent Execution", "failure", f"Agent stream error: {exc}", "query")
@@ -477,7 +478,7 @@ def run_research_agent_stream(query: str, history_messages=None, session_id: str
     if ENABLE_MEMORY:
         save_memory(session_id, query, final_answer)
 
-    set_cached_response(query, final_answer)
+    set_cached_response(query, final_answer, session_id=session_id)
     emit_log("Agent Execution", "success", "Final answer generated", "query")
 
     final_res = {
@@ -486,7 +487,7 @@ def run_research_agent_stream(query: str, history_messages=None, session_id: str
         "citations": collected["citations"],
     }
     if ENABLE_CACHE:
-        set_cache(query, final_res)
+        set_cache(query, final_res, session_id=session_id)
 
     yield {
         "type": "done",

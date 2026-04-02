@@ -2,6 +2,7 @@ import logging
 import math
 import os
 import re
+from typing import Optional
 from collections import Counter, defaultdict
 
 from langchain_core.documents import Document
@@ -27,7 +28,7 @@ def _tokenize(text: str) -> list[str]:
     return re.findall(r"[A-Za-z0-9_]+", (text or "").lower())
 
 
-def _dense_retrieve(query: str, top_k: int) -> list[Document]:
+def _dense_retrieve(query: str, top_k: int, session_id: Optional[str] = None) -> list[Document]:
     cached_embedding = get_embedding_cache(query) if ENABLE_CACHE else None
     if cached_embedding is not None:
         emit_log("Cache", "success", "Cache hit for embeddings", "query")
@@ -38,7 +39,7 @@ def _dense_retrieve(query: str, top_k: int) -> list[Document]:
         if ENABLE_CACHE:
             set_embedding_cache(query, query_embedding)
 
-    results = search_vectors(query_embedding, limit=top_k)
+    results = search_vectors(query_embedding, limit=top_k, session_id=session_id)
     
     docs = []
     for r in results:
@@ -71,15 +72,15 @@ def _merge_results(dense_docs: list[Document], bm25_docs: list[Document], top_k:
     return merged[: max(top_k * 2, top_k)]
 
 
-def hybrid_retrieve(query: str, top_k: int = 5) -> list[Document]:
+def hybrid_retrieve(query: str, top_k: int = 5, session_id: Optional[str] = None) -> list[Document]:
     if ENABLE_CACHE:
-        cached_docs = get_query_cache(query)
+        cached_docs = get_query_cache(query, session_id=session_id)
         if cached_docs is not None:
             emit_log("Cache", "success", "Cache hit for retrieval", "query")
             return cached_docs
         emit_log("Cache", "in_progress", "Cache miss for retrieval", "query")
 
-    dense_docs = _dense_retrieve(query, top_k=top_k)
+    dense_docs = _dense_retrieve(query, top_k=top_k, session_id=session_id)
     bm25_docs = _bm25_retrieve(query, top_k=top_k)
     merged_docs = _merge_results(dense_docs, bm25_docs, top_k=top_k)
 
@@ -91,7 +92,7 @@ def hybrid_retrieve(query: str, top_k: int = 5) -> list[Document]:
     )
 
     if ENABLE_CACHE:
-        set_query_cache(query, merged_docs)
+        set_query_cache(query, merged_docs, session_id=session_id)
 
     return merged_docs
 
@@ -128,7 +129,7 @@ def group_by_source(docs: list[Document]) -> list[Document]:
     return grouped[best_source]
 
 
-def retrieve_context_with_extensions(query: str, top_k: int = 5) -> str:
+def retrieve_context_with_extensions(query: str, top_k: int = 5, session_id: Optional[str] = None) -> str:
     if not query or not query.strip():
         return ""
 
@@ -147,11 +148,11 @@ def retrieve_context_with_extensions(query: str, top_k: int = 5) -> str:
 
     try:
         # Phase 2: Hybrid Query Fallback (normalized -> raw)
-        docs = hybrid_retrieve(final_query, top_k=top_k) if ENABLE_HYBRID else _dense_retrieve(final_query, top_k=top_k)
+        docs = hybrid_retrieve(final_query, top_k=top_k, session_id=session_id) if ENABLE_HYBRID else _dense_retrieve(final_query, top_k=top_k, session_id=session_id)
         
         if not docs and is_rewritten:
             logger.info("Hybrid fallback: No results for normalized query, retrying with raw query.")
-            docs = hybrid_retrieve(query, top_k=top_k) if ENABLE_HYBRID else _dense_retrieve(query, top_k=top_k)
+            docs = hybrid_retrieve(query, top_k=top_k, session_id=session_id) if ENABLE_HYBRID else _dense_retrieve(query, top_k=top_k, session_id=session_id)
 
         if not docs:
             # Fix 1 & 10: Specific "not found" return
@@ -179,5 +180,5 @@ def retrieve_context_with_extensions(query: str, top_k: int = 5) -> str:
     except Exception as exc:
         logger.error("Retrieval pipeline failed: %s", exc, exc_info=True)
         emit_log("Retrieval", "failure", f"Pipeline fallback triggered: {exc}", "query")
-        docs = _dense_retrieve(query, top_k)
+        docs = _dense_retrieve(query, top_k, session_id=session_id)
         return _format_context(docs[:3])

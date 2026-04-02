@@ -18,9 +18,21 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from routes.query import router as query_router
-
 from core.reranker import warmup_reranker
+from infra.vector_db import delete_vectors_older_than
+import time
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+scheduler = AsyncIOScheduler()
+
+@scheduler.scheduled_job("interval", hours=1)
+def cleanup_old_sessions():
+    """Delete vectors older than 2 hours."""
+    cutoff = time.time() - (2 * 60 * 60)
+    try:
+        delete_vectors_older_than(cutoff)
+    except Exception as e:
+        print(f"Periodic cleanup failed: {e}")
 
 app = FastAPI(title="RAG Agent Assistant API", version="1.0.0")
 
@@ -48,6 +60,12 @@ app.add_middleware(
 )
 
 app.include_router(query_router)
+
+@app.on_event("startup")
+async def startup():
+    if not scheduler.running:
+        scheduler.start()
+        print("APScheduler started: Session cleanup job registered.")
 
 
 @app.get("/")

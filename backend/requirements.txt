@@ -24,3 +24,4 @@ beautifulsoup4
 unstructured
 supabase
 upstash-redis
+apscheduler

@@ -45,10 +45,14 @@ DOCUMENTS_PATH = str(ROOT_DIR / "data" / "uploads")
 PROCESSED_PATH = str(ROOT_DIR / "data" / "processed")
 
 # ===== FILE CONFIG =====
-MAX_FILE_SIZE = 20 * 1024 * 1024  # 20MB
+MAX_FILE_SIZE_MB = 10
+MAX_FILE_SIZE = MAX_FILE_SIZE_MB * 1024 * 1024  # 10MB
 SUPPORTED_EXTENSIONS = {".pdf", ".txt", ".csv", ".docx"}
 CHUNK_SIZE = 600
 CHUNK_OVERLAP = 100
+
+# ===== RESOURCE LIMITS =====
+MAX_DOCS_PER_SESSION = 5
 
 # ===== FEATURES =====
 def _env_flag(name: str, default: str = "true") -> bool:
@@ -66,7 +70,7 @@ ENABLE_TOOL_GUARD = _env_flag("ENABLE_TOOL_GUARD", "true")
 # ===== RATE LIMIT =====
 REQUESTS_PER_MINUTE = "10/minute"
 STREAM_REQUESTS_PER_MINUTE = "5/minute"
-UPLOAD_REQUESTS_PER_MINUTE = "5/minute"
+UPLOAD_REQUESTS_PER_MINUTE = "3/minute"
 
 # ===== LOGGING =====
 LOG_PATH = str(ROOT_DIR / "logs" / "app.log")

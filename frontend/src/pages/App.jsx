@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from "react";
-import { deleteDocument, fetchDocuments, fetchHistory, fetchLogs, streamQuery, subscribeToLogs, uploadFiles } from "../api";
+import { deleteDocument, fetchDocuments, fetchHistory, fetchLogs, streamQuery, subscribeToLogs, uploadFiles, clearSession } from "../api";
 import Chat from "../components/Chat";
 import LogsPanel from "../components/LogsPanel";
 import Modal from "../components/Modal";
 import Sidebar from "../components/Sidebar";
+import Toast from "../components/Toast";
+import { useToast } from "../hooks/useToast";
 
 const ENABLE_CHAT_PERSIST = false;
 
@@ -30,10 +31,10 @@ function App() {
   const [serverStatus, setServerStatus] = useState("waking"); // "waking" | "ready" | "error"
   const [thinkingLabel, setThinkingLabel] = useState("Thinking.");
   const [deleteTarget, setDeleteTarget] = useState(null);
-  const [sessionId, setSessionId] = useState(() => Date.now().toString());
   const [pendingResponse, setPendingResponse] = useState("");
   const [uploadState, setUploadState] = useState({ status: "", files: [] });
   const fileInputRef = useRef(null);
+  const { toasts, removeToast, toast } = useToast();
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", theme === "dark");
@@ -68,23 +69,58 @@ function App() {
       onError: () => {},
     });
 
-    return () => source.close();
+    const handleBeforeUnload = () => {
+      // Optional: Fire and forget session cleanup
+      // Navigator.sendBeacon is better for this but requires a specific endpoint design
+      // For now we rely on the 2 hour TTL mainly, but we can try a fetch with keepalive
+      const API_URL = import.meta.env.VITE_API_URL || "https://research-agent-rag-app-1.onrender.com";
+      const sessionId = sessionStorage.getItem("rag_session_id");
+      if (sessionId) {
+        fetch(`${API_URL}/api/session`, {
+          method: "DELETE",
+          headers: { "X-Session-ID": sessionId },
+          keepalive: true,
+        });
+      }
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+
+    return () => {
+      source.close();
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
   }, []);
 
   useEffect(() => {
     const checkBackend = async () => {
       try {
         setServerStatus("waking");
+        toast.info(
+          "Connecting...",
+          "Waking up the server. This may take up to 60 seconds on first load.",
+          7000
+        );
         await fetch(
           `${import.meta.env.VITE_API_URL || "https://research-agent-rag-app-1.onrender.com"}/health`
         );
+        toast.success(
+          "Server Ready",
+          "Connected successfully. You can now upload documents and ask questions.",
+          4000
+        );
         setServerStatus("ready");
-      } catch {
+      } catch (err) {
         setServerStatus("error");
+        toast.error(
+          "Server Unavailable",
+          "Cannot reach the backend server. Please refresh the page or try again later.",
+          10000
+        );
       }
     };
     checkBackend();
-  }, []);
+  }, [toast]);
 
   useEffect(() => {
     if (!loading) {
@@ -109,6 +145,31 @@ function App() {
       return;
     }
 
+    // Addition 1: Pre-flight checks
+    for (const file of files) {
+      // 10MB limit
+      if (file.size > 10 * 1024 * 1024) {
+        toast.error(
+          "File Too Large",
+          `"${file.name}" exceeds the 10MB limit. Please compress or split the file and try again.`,
+          7000
+        );
+        return;
+      }
+
+      // Type check
+      const allowed = [".pdf", ".txt", ".csv", ".docx"];
+      const ext = "." + file.name.split(".").pop().toLowerCase();
+      if (!allowed.includes(ext)) {
+        toast.error(
+          "Unsupported File Type",
+          `"${file.name}" is not supported. Please upload a PDF, TXT, CSV, or DOCX file.`,
+          7000
+        );
+        return;
+      }
+    }
+
     setError("");
     setUploading(true);
     setUploadState({
@@ -124,12 +185,52 @@ function App() {
         status: (data.uploaded_files || []).length ? "Upload complete" : "No new files uploaded",
         files: data.uploaded_files || files.map((file) => file.name),
       });
+
+      if ((data.uploaded_files || []).length > 0) {
+        toast.success(
+          "Upload Successful",
+          `${data.uploaded_files.length} file(s) uploaded and indexed successfully.`,
+          4000
+        );
+      }
     } catch (err) {
       setUploadState({
         status: "Upload failed",
         files: files.map((file) => file.name),
       });
-      setError(friendlyError(err, "Upload failed. Please try again."));
+
+      const msg = err.message || "";
+      if (msg.includes("429") || msg.includes("Too Many")) {
+        toast.error(
+          "Too Many Uploads",
+          "You've reached the upload rate limit. Please wait a minute before uploading again.",
+          8000
+        );
+      } else if (msg.includes("Maximum") && msg.includes("documents")) {
+        toast.error(
+          "Document Limit Reached",
+          "You can upload a maximum of 5 documents per session. Please delete an existing document to upload a new one.",
+          8000
+        );
+      } else if (msg.includes("413") || msg.includes("too large")) {
+        toast.error(
+          "File Too Large",
+          "The file exceeds the maximum allowed size of 10MB. Please compress the file and try again.",
+          7000
+        );
+      } else if (msg.includes("network") || msg.includes("fetch") || msg.includes("Failed to fetch")) {
+        toast.error(
+          "Connection Error",
+          "Could not reach the server. Please check your internet connection or wait for the server to wake up.",
+          8000
+        );
+      } else {
+        toast.error(
+          "Upload Failed",
+          friendlyError(err, "An unexpected error occurred during upload. Please try again."),
+          6000
+        );
+      }
     } finally {
       setUploading(false);
       if (fileInputRef.current) {
@@ -141,7 +242,16 @@ function App() {
   const handleSubmit = async (event) => {
     event.preventDefault();
     const trimmed = query.trim();
-    if (!trimmed || loading || uploading) {
+    if (!trimmed) {
+      toast.warning(
+        "Empty Question",
+        "Please type a question before sending.",
+        3000
+      );
+      return;
+    }
+    
+    if (loading || uploading) {
       return;
     }
 
@@ -154,7 +264,6 @@ function App() {
     try {
       await streamQuery({
         query: trimmed,
-        session_id: sessionId,
         onEvent: ({ type, data }) => {
           if (type === "meta" && data?.logs) {
             setLogs(data.logs);
@@ -172,12 +281,36 @@ function App() {
         },
         onError: (msg) => {
           setPendingResponse("");
-          setError(msg || "The assistant could not complete that request.");
+          toast.error(
+            "Query Failed",
+            msg || "Something went wrong. Please try again.",
+            6000
+          );
         },
       });
     } catch (err) {
+      const msg = err.message || "";
       setPendingResponse("");
-      setError(friendlyError(err, "The assistant could not complete that request."));
+      
+      if (msg.includes("429") || msg.includes("Too Many")) {
+        toast.warning(
+          "Slow Down!",
+          "You're sending queries too quickly. Please wait a moment before asking another question.",
+          6000
+        );
+      } else if (msg.includes("network") || msg.includes("fetch") || msg.includes("Failed to fetch")) {
+        toast.error(
+          "Connection Lost",
+          "Lost connection to the server. The server may be waking up — please wait 30 seconds and try again.",
+          8000
+        );
+      } else {
+        toast.error(
+          "Query Failed",
+          friendlyError(err, "The assistant could not complete that request."),
+          6000
+        );
+      }
     } finally {
       setLoading(false);
     }
@@ -193,23 +326,40 @@ function App() {
       const data = await deleteDocument(deleteTarget.doc_id);
       setDocuments(data.documents || []);
       setLogs(data.logs || []);
+      toast.success(
+        "Document Deleted",
+        `"${deleteTarget.file_name}" has been removed successfully.`,
+        3000
+      );
     } catch (err) {
-      setError(friendlyError(err, "Delete failed. Please try again."));
+      toast.error(
+        "Delete Failed",
+        `Could not delete "${deleteTarget.file_name}". Please try again.`,
+        5000
+      );
     } finally {
       setDeleteTarget(null);
     }
   };
 
-  const handleNewChat = () => {
-    setMessages([]);
-    setPendingResponse("");
-    setQuery("");
-    setSessionId(Date.now().toString());
-    setError("");
+  const handleNewChat = async () => {
+    if (window.confirm("Start a new session? This will clear your current documents and history.")) {
+      try {
+        await clearSession();
+        sessionStorage.removeItem("rag_session_id");
+        window.location.reload();
+      } catch (err) {
+        setMessages([]);
+        setPendingResponse("");
+        setQuery("");
+        setError("");
+      }
+    }
   };
 
   return (
     <>
+      <Toast toasts={toasts} removeToast={removeToast} />
       <div className="app">
         <Sidebar documents={documents} uploadState={uploadState} onDeleteDocument={setDeleteTarget} />
 
@@ -219,6 +369,11 @@ function App() {
               <div>
                 <h1>RAG Agent Assistant</h1>
                 <p>Grounded answers from your uploaded files, retrieval, and agent workflow.</p>
+                <div className="session-status">
+                  <span className={`status-pill ${documents.length >= 5 ? 'at-limit' : ''}`}>
+                    Documents: {documents.length} / 5
+                  </span>
+                </div>
               </div>
               <button
                 type="button"
@@ -247,17 +402,6 @@ function App() {
             />
           </div>
 
-          {error ? <div className="error-banner">{error}</div> : null}
-          {serverStatus === "waking" && (
-            <div className="warning-banner">
-              ⏳ Waking up server, please wait 30–60 seconds...
-            </div>
-          )}
-          {serverStatus === "error" && (
-            <div className="error-banner">
-              ⚠️ Cannot reach server. Please refresh or try again later.
-            </div>
-          )}
           <form className="input-bar" onSubmit={handleSubmit}>
             <button
               className="composer-icon-button"

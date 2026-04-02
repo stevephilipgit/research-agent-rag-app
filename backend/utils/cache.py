@@ -22,8 +22,9 @@ if REDIS_URL:
 # In-memory implementation for fallback
 _cache = {}
 
-def _get_key(prefix: str, query: str) -> str:
-    h = hashlib.md5(query.encode()).hexdigest()
+def _get_key(prefix: str, query: str, session_id: Optional[str] = None) -> str:
+    combined = f"{session_id}:{query}" if session_id else query
+    h = hashlib.md5(combined.encode()).hexdigest()
     return f"{prefix}:{h}"
 
 def get_cache_raw(key: str) -> Optional[Any]:
@@ -49,26 +50,27 @@ def set_cache_raw(key: str, value: Any, ttl: int = 300):
             logger.warning(f"Redis set failed for {key}: {e}")
     _cache[key] = value
 
-def get_cache(key: str) -> Optional[Any]:
-    return get_cache_raw(_get_key("query", key))
+def get_cache(query: str, session_id: Optional[str] = None) -> Optional[Any]:
+    return get_cache_raw(_get_key("query", query, session_id))
 
-def set_cache(key: str, value: Any, ttl: int = 300):
-    set_cache_raw(_get_key("query", key), value, ttl)
+def set_cache(query: str, value: Any, session_id: Optional[str] = None, ttl: int = 300):
+    set_cache_raw(_get_key("query", query, session_id), value, ttl)
 
-def get_query_cache(query: str) -> Optional[Any]:
-    return get_cache_raw(_get_key("query", query))
+def get_query_cache(query: str, session_id: Optional[str] = None) -> Optional[Any]:
+    return get_cache_raw(_get_key("query", query, session_id))
 
-def set_query_cache(query: str, docs: Any):
-    set_cache_raw(_get_key("query", query), docs)
+def set_query_cache(query: str, docs: Any, session_id: Optional[str] = None):
+    set_cache_raw(_get_key("query", query, session_id), docs)
 
 def get_embedding_cache(query: str) -> Optional[Any]:
+    # Embeddings are global for the same query text
     return get_cache_raw(_get_key("emb", query))
 
 def set_embedding_cache(query: str, embedding: Any):
     set_cache_raw(_get_key("emb", query), embedding)
 
-def get_cached_response(query: str) -> Optional[Any]:
-    return get_cache_raw(_get_key("resp", query))
+def get_cached_response(query: str, session_id: Optional[str] = None) -> Optional[Any]:
+    return get_cache_raw(_get_key("resp", query, session_id))
 
-def set_cached_response(query: str, response: Any):
-    set_cache_raw(_get_key("resp", query), response)
+def set_cached_response(query: str, response: Any, session_id: Optional[str] = None):
+    set_cache_raw(_get_key("resp", query, session_id), response)

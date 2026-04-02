@@ -25,13 +25,13 @@ def _get_client():
     return _supabase_client
 
 
-def upload_file(file_bytes: bytes, file_name: str) -> str:
+def upload_file(file_bytes: bytes, file_name: str, session_id: str = "default") -> str:
     """
-    Upload file_bytes to Supabase Storage bucket 'documents'.
-    Returns the storage path (e.g. 'uploads/report.pdf').
+    Upload file_bytes to Supabase Storage bucket 'documents' under session-scoped path.
+    Returns the storage path (e.g. 'uploads/uuid-123/report.pdf').
     Overwrites an existing file with the same name.
     """
-    storage_path = f"uploads/{file_name}"
+    storage_path = f"uploads/{session_id}/{file_name}"
     try:
         client = _get_client()
         client.storage.from_(BUCKET_NAME).upload(

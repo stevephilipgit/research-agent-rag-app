@@ -25,10 +25,10 @@ from infra.db import load_registry, save_doc_to_registry
 from core.telemetry import emit_log, get_logs as get_structured_logs
 from services.security import validate_file
 from infra.storage import upload_file, delete_file, get_file_url
-from infra.vector_db import get_collection_count, delete_vectors_by_doc_id
+from infra.vector_db import get_collection_count, delete_vectors_by_doc_id, get_session_document_count
 from utils.sanitize import clean_query
 from utils.cache_db import invalidate_cache
-from config.settings import PROCESSED_PATH
+from config.settings import PROCESSED_PATH, MAX_DOCS_PER_SESSION, MAX_FILE_SIZE_MB
 
 # In-memory session store
 _session_histories: dict[str, list[dict]] = {}
@@ -50,8 +50,10 @@ def get_logs() -> List[dict]:
     return get_structured_logs()
 
 
-def get_documents() -> List[dict]:
-    return load_registry()
+def get_documents(session_id: str = "default") -> List[dict]:
+    # Filter the registry to only show documents for this session
+    registry = load_registry()
+    return [doc for doc in registry if f"uploads/{session_id}/" in (doc.get("storage_path") or "")]
 
 
 def _ingestion_callback(message: str) -> None:
@@ -82,7 +84,16 @@ def _ingestion_callback(message: str) -> None:
         log_event("Pipeline", "success", message, "pipeline")
 
 
-async def upload_documents(files: List[UploadFile]) -> dict:
+async def upload_documents(files: List[UploadFile], session_id: str = "default") -> dict:
+    # Addition 3: Check file count for this session from Qdrant
+    existing_count = get_session_document_count(session_id)
+    if existing_count + len(files) > MAX_DOCS_PER_SESSION:
+        log_event("File Upload", "failure", f"Max documents ({MAX_DOCS_PER_SESSION}) exceeded for session", "pipeline")
+        raise HTTPException(
+            status_code=429,
+            detail=f"Maximum {MAX_DOCS_PER_SESSION} documents per session allowed. You already have {existing_count}."
+        )
+
     docs = load_registry()
     processed_hashes = {doc.get("file_hash") for doc in docs if doc.get("file_hash")}
     existing_names = {doc.get("file_name") for doc in docs}
@@ -109,9 +120,15 @@ async def upload_documents(files: List[UploadFile]) -> dict:
             log_event("File Upload", "failure", f"Duplicate name: {file_name} already exists", "pipeline")
             continue
 
+        # Security: File Validation & Size Check
         file_size = len(content)
-        
-        # Security: File Validation
+        if file_size > MAX_FILE_SIZE_MB * 1024 * 1024:
+             log_event("File Upload", "failure", f"File too large: {file_name}", "pipeline")
+             raise HTTPException(
+                status_code=413,
+                detail=f"File {file_name} too large. Maximum size is {MAX_FILE_SIZE_MB}MB."
+            )
+
         if not validate_file(file_name, file_size):
             log_event("File Upload", "failure", f"Security block: {file_name} failed validation", "pipeline")
             continue
@@ -119,8 +136,8 @@ async def upload_documents(files: List[UploadFile]) -> dict:
         doc_id = str(uuid.uuid4())
 
         try:
-            log_event("File Upload", "in_progress", f"Uploading {file_name} to cloud storage...", "pipeline")
-            storage_path = upload_file(content, file_name)
+            log_event("File Upload", "in_progress", f"Uploading {file_name} to cloud storage (session: {session_id})...", "pipeline")
+            storage_path = upload_file(content, file_name, session_id=session_id)
             public_url = get_file_url(storage_path)
             file.file.close()
 
@@ -163,8 +180,8 @@ async def upload_documents(files: List[UploadFile]) -> dict:
         }
 
     try:
-        logger.info(f"Starting ingestion process for {len(saved_paths)} new file(s): {saved_names}")
-        result = ingest_documents(saved_paths, callback=_ingestion_callback)
+        logger.info(f"Starting ingestion process for {len(saved_paths)} new file(s) for session {session_id}")
+        result = ingest_documents(saved_paths, session_id=session_id, callback=_ingestion_callback)
         logger.info(f"Ingestion completed with status: {result.get('status')}. Vector count: {result.get('vector_count')}")
         if result.get("status") == "success":
             log_event("File Upload", "success", "Upload & Ingestion completed", "pipeline")
@@ -223,7 +240,7 @@ def delete_registered_document(doc_id: str) -> dict:
         return {
             "status": "success",
             "message": "Document deleted successfully.",
-            "documents": get_documents(),
+            "documents": get_documents(getattr(entry, 'session_id', 'default')),
             "logs": get_logs(),
         }
     except Exception as e:
