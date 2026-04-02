@@ -5,6 +5,7 @@ import LogsPanel from "../components/LogsPanel";
 import Modal from "../components/Modal";
 import Sidebar from "../components/Sidebar";
 import Toast from "../components/Toast";
+import Loader from "../components/Loader";
 import { useToast } from "../hooks/useToast";
 
 const ENABLE_CHAT_PERSIST = false;
@@ -94,34 +95,31 @@ function App() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+
     const checkBackend = async () => {
+      const BASE_URL = import.meta.env.VITE_API_URL || "https://research-agent-rag-app-1.onrender.com";
       try {
-        setServerStatus("waking");
-        toast.info(
-          "Connecting...",
-          "Waking up the server. This may take up to 60 seconds on first load.",
-          7000
-        );
-        await fetch(
-          `${import.meta.env.VITE_API_URL || "https://research-agent-rag-app-1.onrender.com"}/health`
-        );
-        toast.success(
-          "Server Ready",
-          "Connected successfully. You can now upload documents and ask questions.",
-          4000
-        );
-        setServerStatus("ready");
-      } catch (err) {
-        setServerStatus("error");
-        toast.error(
-          "Server Unavailable",
-          "Cannot reach the backend server. Please refresh the page or try again later.",
-          10000
-        );
+        await fetch(`${BASE_URL}/health`);
+        if (!cancelled) setServerStatus("ready");
+      } catch {
+        if (!cancelled) {
+          // Retry once after 10 seconds
+          setTimeout(async () => {
+            try {
+              await fetch(`${BASE_URL}/health`);
+              if (!cancelled) setServerStatus("ready");
+            } catch {
+              if (!cancelled) setServerStatus("error");
+            }
+          }, 10000);
+        }
       }
     };
+
     checkBackend();
-  }, [toast]);
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     if (!loading) {
@@ -360,6 +358,7 @@ function App() {
 
   return (
     <>
+      <Loader status={serverStatus} />
       <Toast toasts={toasts} removeToast={removeToast} />
       <div className="app">
         <Sidebar documents={documents} uploadState={uploadState} onDeleteDocument={setDeleteTarget} />
