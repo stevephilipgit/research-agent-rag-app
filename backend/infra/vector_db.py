@@ -33,6 +33,17 @@ def ensure_collection_exists():
                 )
             )
             logger.info(f"Created Qdrant collection '{COLLECTION_NAME}'")
+            
+            # Create payload index for 'source' field (for efficient filtering)
+            try:
+                client.create_payload_index(
+                    collection_name=COLLECTION_NAME,
+                    field_name="source",
+                    field_schema="text",
+                )
+                logger.info("Created payload index for 'source' field")
+            except Exception as e:
+                logger.info(f"Payload index for 'source' may already exist: {e}")
         else:
             logger.debug(f"Collection '{COLLECTION_NAME}' already exists in Qdrant")
     except Exception as exc:

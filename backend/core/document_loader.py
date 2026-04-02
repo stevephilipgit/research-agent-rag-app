@@ -149,16 +149,26 @@ def delete_document(doc_id: str):
     logger.info(f"Removed doc_id {doc_id} from registry")
     
 
-def ingest_documents(file_paths: Optional[List[str]] = None, callback: Optional[Callable[[str], None]] = None) -> dict:
+def ingest_documents(file_paths: Optional[List[str]] = None, file_names: Optional[List[str]] = None, callback: Optional[Callable[[str], None]] = None) -> dict:
     steps = []
     def record(m): steps.append(m); _emit_step(callback, m)
+    
+    # Log exact inputs to diagnose duplicate chunking
+    logger.info(f"ingest_documents called with {len(file_paths) if file_paths else 0} paths and {len(file_names) if file_names else 0} names.")
+    if file_paths:
+        logger.debug(f"Input paths: {file_paths}")
     
     try:
         if file_paths is None:
             file_paths = [os.path.join(DOCUMENTS_PATH, f) for f in os.listdir(DOCUMENTS_PATH) if os.path.isfile(os.path.join(DOCUMENTS_PATH, f))]
         
-        # De-duplicate file paths while preserving order
-        file_paths = list(dict.fromkeys(file_paths))
+        # De-duplicate file paths and file names while preserving order
+        if file_paths:
+            file_paths = list(dict.fromkeys(file_paths))
+            logger.info(f"After dedup: {len(file_paths)} unique path(s)")
+            
+        if file_names:
+            file_names = list(dict.fromkeys(file_names))
         
         # Phase 5: Duplicate Prevention via Hashing
         registry = load_registry()

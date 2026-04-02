@@ -25,6 +25,16 @@ def get_reranker_model():
                     import torch
                     from sentence_transformers import CrossEncoder
 
+                    # Authenticate with HuggingFace if token is available
+                    hf_token = os.environ.get("HF_TOKEN")
+                    if hf_token:
+                        try:
+                            from huggingface_hub import login
+                            login(token=hf_token, add_to_git_credential=False)
+                            logger.info("HuggingFace login successful")
+                        except Exception as login_exc:
+                            logger.warning(f"HuggingFace login failed: {login_exc}")
+
                     device = "cuda" if torch.cuda.is_available() else "cpu"
                     if device == "cpu":
                         torch.set_num_threads(RERANKER_CPU_THREADS)
