@@ -71,7 +71,14 @@ def load_documents(
     registry_by_name = {d.get("file_name"): d.get("doc_id") for d in registry}
 
     documents: List[Document] = []
+    processed_paths = set()
+
     for path in file_paths:
+        if path in processed_paths:
+            logger.warning(f"Skipping duplicate path: {path}")
+            continue
+        processed_paths.add(path)
+
         file_path = path
         is_temp = False
         try:

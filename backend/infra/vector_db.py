@@ -19,60 +19,36 @@ def get_client() -> QdrantClient:
     return client
 
 def ensure_collection_exists():
-    """Create the Qdrant collection if it doesn't exist."""
+    """Create the Qdrant collection if it doesn't exist and ensure indexes are created."""
     try:
-        collections = client.get_collections().collections
-        exists = any(c.name == COLLECTION_NAME for c in collections)
-        
-        if not exists:
-            logger.info(f"Creating collection '{COLLECTION_NAME}' in Qdrant")
+        client = get_client()
+        existing = [c.name for c in client.get_collections().collections]
+        if COLLECTION_NAME not in existing:
             from qdrant_client.models import Distance, VectorParams
             client.create_collection(
                 collection_name=COLLECTION_NAME,
                 vectors_config=VectorParams(
-                    size=EMBEDDING_DIMENSION, 
-                    distance=Distance.COSINE
-                )
+                    size=EMBEDDING_DIMENSION,
+                    distance=Distance.COSINE,
+                ),
             )
             logger.info(f"Created Qdrant collection '{COLLECTION_NAME}'")
-            
-            # Create payload index for 'source' field (for efficient filtering)
-            try:
-                client.create_payload_index(
-                    collection_name=COLLECTION_NAME,
-                    field_name="source",
-                    field_schema="text",
-                )
-                logger.info("Created payload index for 'source' field")
-            except Exception as e:
-                logger.info(f"Payload index for 'source' may already exist: {e}")
-                
-            # Create payload index for 'session_id' (keyword)
-            try:
-                client.create_payload_index(
-                    collection_name=COLLECTION_NAME,
-                    field_name="session_id",
-                    field_schema="keyword",
-                )
-                logger.info("Created payload index for 'session_id' field")
-            except Exception as e:
-                logger.info(f"Payload index for 'session_id' may already exist: {e}")
 
-            # Create payload index for 'created_at' (numeric)
+        # Always ensure indexes exist (safe to call even if they exist)
+        for field, schema in [("source", "text"), ("session_id", "keyword"), ("created_at", "integer")]:
             try:
                 client.create_payload_index(
                     collection_name=COLLECTION_NAME,
-                    field_name="created_at",
-                    field_schema="integer",
+                    field_name=field,
+                    field_schema=schema,
                 )
-                logger.info("Created payload index for 'created_at' field")
-            except Exception as e:
-                logger.info(f"Payload index for 'created_at' may already exist: {e}")
-        else:
-            logger.debug(f"Collection '{COLLECTION_NAME}' already exists in Qdrant")
-    except Exception as exc:
-        logger.error(f"Failed to ensure Qdrant collection exists: {exc}")
-        raise exc
+                logger.info(f"Created payload index for '{field}'")
+            except Exception:
+                pass  # index already exists, ignore
+
+    except Exception as e:
+        logger.error(f"Failed to ensure collection exists: {e}")
+        raise
 
 def upsert_vectors(points: List[dict], session_id: str = "default"):
     """Upserts a list of vector points into Qdrant, tagged with session_id."""

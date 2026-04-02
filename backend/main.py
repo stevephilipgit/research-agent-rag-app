@@ -20,7 +20,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from core.reranker import warmup_reranker
-from infra.vector_db import delete_vectors_older_than
+from infra.vector_db import delete_vectors_older_than, ensure_collection_exists
 import time
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -67,6 +67,12 @@ async def startup():
     if not scheduler.running:
         scheduler.start()
         print("APScheduler started: Session cleanup job registered.")
+    
+    try:
+        ensure_collection_exists()
+        print("Qdrant collection and indexes verified on startup")
+    except Exception as e:
+        print(f"Startup Qdrant check failed: {e}")
 
 
 @app.get("/")

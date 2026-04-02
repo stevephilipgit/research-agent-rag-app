@@ -52,12 +52,15 @@ def _make_key(query: str) -> str:
     return f"resp:{digest}"
 
 
-def get_cached_response(query: str) -> Optional[str]:
+def get_cached_response(query: str, session_id: str = None) -> Optional[str]:
     """
     Return cached answer string for *query*, or None on a MISS.
     Tries Upstash Redis first, falls back to in-memory dict.
+    Uses session_id to isolate cache per user.
     """
-    key = _make_key(query)
+    # Use session_id as part of cache key to isolate per user
+    cache_key = f"{session_id}:{query}" if session_id else query
+    key = _make_key(cache_key)
     try:
         redis = _get_redis()
         if redis is not None:
@@ -80,12 +83,14 @@ def get_cached_response(query: str) -> Optional[str]:
 
 
 def set_cached_response(
-    query: str, response: str, ttl_seconds: int = 3600
+    query: str, response: str, session_id: str = None, ttl_seconds: int = 3600
 ) -> None:
     """
     Store *response* in Redis (TTL 1h) and in-memory fallback.
+    Uses session_id for key isolation.
     """
-    key = _make_key(query)
+    cache_key = f"{session_id}:{query}" if session_id else query
+    key = _make_key(cache_key)
     try:
         redis = _get_redis()
         if redis is not None:

@@ -342,18 +342,28 @@ function App() {
   };
 
   const handleNewChat = async () => {
-    if (window.confirm("Start a new session? This will clear your current documents and history.")) {
-      try {
-        await clearSession();
-        sessionStorage.removeItem("rag_session_id");
-        window.location.reload();
-      } catch (err) {
-        setMessages([]);
-        setPendingResponse("");
-        setQuery("");
-        setError("");
-      }
+    // Clear UI state immediately
+    setMessages([]);
+    setDocuments([]);
+    setQuery("");
+    setPendingResponse("");
+    setError("");
+    setServerStatus("ready");
+
+    // Generate fresh session ID
+    const newSessionId = crypto.randomUUID();
+    
+    // Clean up old session on backend BEFORE switching ID in storage
+    try {
+      await clearSession();
+    } catch (e) {
+      console.warn("Session cleanup failed:", e);
     }
+
+    // Now switch to new session ID
+    sessionStorage.setItem("rag_session_id", newSessionId);
+    
+    toast.success("New Chat Started", "Your session has been reset and documents cleared.", 3000);
   };
 
   return (
