@@ -1,4 +1,4 @@
-# 🚀 AI Research Assistant: The Ultimate Agentic RAG Platform
+## AI Research Assistant: The Ultimate Agentic RAG Platform
 
 ![AI Research RAG Assistant](docs/images/hero.png)
 
