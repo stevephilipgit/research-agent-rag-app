@@ -7,7 +7,7 @@ import traceback
 from pathlib import Path
 from typing import Iterator, List
 
-from fastapi import UploadFile
+from fastapi import UploadFile, HTTPException
 from langchain_core.messages import AIMessage, HumanMessage
 import logging
 from threading import Lock
@@ -24,11 +24,13 @@ from core.document_loader import delete_document, ingest_documents
 from infra.db import load_registry, save_doc_to_registry
 from core.telemetry import emit_log, get_logs as get_structured_logs
 from services.security import validate_file
+from services.self_healing import self_healing_flow, get_retrieval_params, get_model, reset_adaptive_state
+from services.metrics_service import MetricsService
 from infra.storage import upload_file, delete_file, get_file_url
 from infra.vector_db import get_collection_count, delete_vectors_by_doc_id, get_session_document_count
 from utils.sanitize import clean_query
 from utils.cache_db import invalidate_cache
-from config.settings import PROCESSED_PATH, MAX_DOCS_PER_SESSION, MAX_FILE_SIZE_MB
+from config.settings import PROCESSED_PATH, MAX_DOCS_PER_SESSION, MAX_FILE_SIZE_MB, ENABLE_SELF_HEALING
 
 # In-memory session store
 _session_histories: dict[str, list[dict]] = {}
@@ -254,7 +256,7 @@ def delete_registered_document(doc_id: str) -> dict:
         }
 
 
-def query_agent(query: str, session_id: str = "default") -> dict:
+def query_agent(query: str, session_id: str = "default", enable_self_healing: bool = False) -> dict:
     query = clean_query(query)
     history_messages = []
     with _session_lock:
@@ -271,10 +273,61 @@ def query_agent(query: str, session_id: str = "default") -> dict:
     log_event("Retrieval", "in_progress", f"Number of documents in vector DB: {vector_count}", "query")
     log_event("Agent Execution", "in_progress", "Agent started", "query")
 
-    result = run_research_agent(query, history_messages, session_id=session_id)
-    answer = result.get("answer", "") if isinstance(result, dict) else str(result)
-    steps = result.get("steps", []) if isinstance(result, dict) else []
-    citations = result.get("citations", []) if isinstance(result, dict) else []
+    # Self-Healing Integration - respect request flag or system flag
+    eval_score = None
+    retry_count = 0
+    use_self_healing = ENABLE_SELF_HEALING or enable_self_healing
+    
+    if use_self_healing:
+        # Storage for results from each attempt
+        last_result = {"answer": "", "steps": [], "citations": []}
+
+        def generate_answer(modified_query: str) -> str:
+            """Generate answer for modified query, storing full result."""
+            nonlocal last_result
+            result = run_research_agent(modified_query, history_messages, session_id=session_id)
+            last_result = {
+                "answer": result.get("answer", "") if isinstance(result, dict) else str(result),
+                "steps": result.get("steps", []) if isinstance(result, dict) else [],
+                "citations": result.get("citations", []) if isinstance(result, dict) else [],
+            }
+            return last_result["answer"]
+
+        # Apply self-healing wrapper to answer generation
+        start_time = time.time()
+        answer, eval_score, retry_count = self_healing_flow(
+            query=query,
+            generate_fn=generate_answer,
+            context=""
+        )
+        elapsed_time = time.time() - start_time
+
+        # UPGRADE 5: Enhanced metrics with best_score, model, top_k
+        retrieval_params = get_retrieval_params()
+        model_used = get_model()
+        
+        MetricsService.log_self_healing_complete(
+            total_retries=retry_count,
+            final_score=eval_score,
+            elapsed_time=elapsed_time,
+            accepted=eval_score >= 0.75,
+            best_score=eval_score,  # Will be tracked by self_healing_flow
+            model_used=model_used,
+            top_k=retrieval_params.get("top_k", 5)
+        )
+        
+        # Reset adaptive state for next query
+        reset_adaptive_state()
+
+        # Use answer from self-healing, but steps/citations from last attempt
+        steps = last_result.get("steps", [])
+        citations = last_result.get("citations", [])
+    else:
+        # Original flow - no self-healing
+        result = run_research_agent(query, history_messages, session_id=session_id)
+        answer = result.get("answer", "") if isinstance(result, dict) else str(result)
+        steps = result.get("steps", []) if isinstance(result, dict) else []
+        citations = result.get("citations", []) if isinstance(result, dict) else []
 
     with _session_lock:
         session_history.append({"role": "user", "content": query})
@@ -297,10 +350,13 @@ def query_agent(query: str, session_id: str = "default") -> dict:
         "messages": get_history(session_id),
         "logs": get_logs(),
         "debug": {"vector_count": vector_count},
+        "eval_score": eval_score,
+        "retry_count": retry_count,
+        "self_healing_enabled": use_self_healing,
     }
 
 
-def stream_query_events(query: str, session_id: str = "default") -> Iterator[dict]:
+def stream_query_events(query: str, session_id: str = "default", enable_self_healing: bool = False) -> Iterator[dict]:
     query = clean_query(query)
     history_messages = []
     with _session_lock:
@@ -322,7 +378,11 @@ def stream_query_events(query: str, session_id: str = "default") -> Iterator[dic
     streamed_answer = ""
     steps = []
     citations = []
+    eval_score = None
+    retry_count = 0
+    use_self_healing = ENABLE_SELF_HEALING or enable_self_healing
 
+    # Stream from research agent normally
     for event in run_research_agent_stream(query, history_messages, session_id=session_id):
         if event["type"] == "token":
             streamed_answer += event["data"]
@@ -338,6 +398,19 @@ def stream_query_events(query: str, session_id: str = "default") -> Iterator[dic
             steps = event["data"].get("steps", [])
             citations = event["data"].get("citations", [])
 
+    # If self-healing enabled, evaluate the response quality
+    if use_self_healing and streamed_answer:
+        try:
+            from services.eval_engine import EvaluationEngine
+            evaluator = EvaluationEngine()
+            eval_scores = evaluator.evaluate(query, streamed_answer, context="")
+            eval_score = evaluator.final_score(eval_scores)
+            # For streaming, retry_count is 0 (single attempt) unless we implement retry loop
+            retry_count = 0
+        except Exception as e:
+            logger.warning(f"Self-healing evaluation failed: {e}")
+            eval_score = None
+
     with _session_lock:
         session_history.append({"role": "user", "content": query})
         session_history.append(
@@ -346,6 +419,9 @@ def stream_query_events(query: str, session_id: str = "default") -> Iterator[dic
                 "content": streamed_answer,
                 "steps": steps,
                 "citations": citations,
+                "eval_score": eval_score,
+                "retry_count": retry_count,
+                "self_healing_enabled": use_self_healing,
             }
         )
 
@@ -361,5 +437,8 @@ def stream_query_events(query: str, session_id: str = "default") -> Iterator[dic
             "messages": get_history(session_id),
             "logs": get_logs(),
             "debug": {"vector_count": vector_count},
+            "eval_score": eval_score,
+            "retry_count": retry_count,
+            "self_healing_enabled": use_self_healing,
         },
     }

@@ -5,21 +5,38 @@ import shutil
 from typing import List, Optional
 from qdrant_client import QdrantClient, models
 from qdrant_client.models import NamedVector, ScoredPoint
-from config.settings import QDRANT_URL, QDRANT_API_KEY, EMBEDDING_DIMENSION, PROCESSED_PATH
+from backend.config.settings import QDRANT_URL, QDRANT_API_KEY, EMBEDDING_DIMENSION, PROCESSED_PATH
 
 logger = logging.getLogger(__name__)
 
-# Initialize Qdrant Client
-client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
+
+# Qdrant connection check and fallback
+def is_qdrant_available():
+    try:
+        test_client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
+        test_client.get_collections()
+        return True
+    except Exception as e:
+        logger.warning(f"Qdrant unavailable: {e}")
+        return False
+
+QDRANT_AVAILABLE = is_qdrant_available()
+if QDRANT_AVAILABLE:
+    client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
+else:
+    client = None
 
 COLLECTION_NAME = "documents"
 
 def get_client() -> QdrantClient:
-    """Returns the Qdrant client instance."""
+    if not QDRANT_AVAILABLE:
+        raise RuntimeError("Qdrant is not available.")
     return client
 
 def ensure_collection_exists():
-    """Create the Qdrant collection if it doesn't exist and ensure indexes are created."""
+    if not QDRANT_AVAILABLE:
+        logger.warning("Qdrant unavailable: skipping collection check.")
+        return
     try:
         client = get_client()
         existing = [c.name for c in client.get_collections().collections]
@@ -33,8 +50,6 @@ def ensure_collection_exists():
                 ),
             )
             logger.info(f"Created Qdrant collection '{COLLECTION_NAME}'")
-
-        # Always ensure indexes exist (safe to call even if they exist)
         for field, schema in [("source", "text"), ("session_id", "keyword"), ("created_at", "integer")]:
             try:
                 client.create_payload_index(
@@ -44,14 +59,15 @@ def ensure_collection_exists():
                 )
                 logger.info(f"Created payload index for '{field}'")
             except Exception:
-                pass  # index already exists, ignore
-
+                pass
     except Exception as e:
         logger.error(f"Failed to ensure collection exists: {e}")
         raise
 
 def upsert_vectors(points: List[dict], session_id: str = "default"):
-    """Upserts a list of vector points into Qdrant, tagged with session_id."""
+    if not QDRANT_AVAILABLE:
+        logger.warning("Qdrant unavailable: skipping upsert.")
+        return
     ensure_collection_exists()
     try:
         client.upsert(
@@ -66,7 +82,6 @@ def upsert_vectors(points: List[dict], session_id: str = "default"):
                         "text": p["payload"].get("page_content") or p["payload"].get("text", ""),
                         "session_id": session_id,
                         "created_at": time.time(),
-                        # Preserve any other metadata
                         **{k: v for k, v in p["payload"].items() if k not in ["source", "page", "text", "page_content", "session_id", "created_at"]}
                     }
                 ) for p in points
@@ -78,9 +93,10 @@ def upsert_vectors(points: List[dict], session_id: str = "default"):
         raise exc
 
 def search_vectors(query_vector: List[float], limit: int = 5, session_id: Optional[str] = None) -> List[dict]:
-    """Performs semantic search in Qdrant, filtered by session_id if provided."""
+    if not QDRANT_AVAILABLE:
+        logger.warning("Qdrant unavailable: returning empty search result.")
+        return []
     ensure_collection_exists()
-    
     search_filter = None
     if session_id:
         search_filter = models.Filter(
@@ -91,7 +107,6 @@ def search_vectors(query_vector: List[float], limit: int = 5, session_id: Option
                 )
             ]
         )
-        
     try:
         results = client.query_points(
             collection_name=COLLECTION_NAME,

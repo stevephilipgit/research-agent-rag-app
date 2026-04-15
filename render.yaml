@@ -38,6 +38,10 @@ services:
         value: "false"
       - key: PYTORCH_NO_CUDA_MEMORY_CACHING
         value: "1"
+      - key: ENABLE_SELF_HEALING
+        value: "false"
+      - key: USE_LLM_EVAL
+        value: "false"
 
   - type: static
     name: research-assistant-frontend

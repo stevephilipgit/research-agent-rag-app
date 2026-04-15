@@ -31,6 +31,42 @@ if not QDRANT_URL or not QDRANT_API_KEY:
 
 # ===== LLM CONFIG =====
 DEFAULT_MODEL = "llama-3.1-8b-instant"
+GROQ_MODEL = DEFAULT_MODEL
+import os
+import sys
+import logging
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Limit native threads to prevent OMP/MKL related crashes in high-concurrency environments
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+# Safe fallback
+load_dotenv()
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+
+# ===== API KEYS =====
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
+
+# ===== CLOUD SERVICES =====
+QDRANT_URL = os.getenv("QDRANT_URL")
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
+
+if not GROQ_API_KEY:
+    print("WARNING: Missing GROQ_API_KEY. Set it in .env or Render environment tab.")
+if not TAVILY_API_KEY:
+    print("WARNING: Missing TAVILY_API_KEY. Set it in .env or Render environment tab.")
+if not QDRANT_URL or not QDRANT_API_KEY:
+    print("WARNING: Missing QDRANT credentials. Set them in .env or Render environment tab.")
+
+
+# ===== LLM CONFIG =====
+DEFAULT_MODEL = "llama-3.1-8b-instant"
+GROQ_MODEL = DEFAULT_MODEL
 
 LLM_TIMEOUT = 30
 LLM_TEMPERATURE = 0
@@ -68,6 +104,8 @@ ENABLE_REWRITE = _env_flag("ENABLE_REWRITE", "true")
 ENABLE_HYBRID = _env_flag("ENABLE_HYBRID", "true")
 ENABLE_RETRY = _env_flag("ENABLE_RETRY", "true")
 ENABLE_TOOL_GUARD = _env_flag("ENABLE_TOOL_GUARD", "true")
+ENABLE_SELF_HEALING = _env_flag("ENABLE_SELF_HEALING", "false")  # disabled by default - opt-in feature
+USE_LLM_EVAL = _env_flag("USE_LLM_EVAL", "false")  # disabled by default - use LLM-based response evaluation (higher cost)
 
 # ===== RATE LIMIT =====
 REQUESTS_PER_MINUTE = "10/minute"

@@ -1,8 +1,8 @@
 from langchain.docstore.document import Document
 
-from services.hybrid_retriever import _merge_results, hybrid_retrieve
-from services.query_rewriter import rewrite_query
-from utils.cache import get_embedding_cache, get_query_cache, set_embedding_cache, set_query_cache
+from backend.core.rag import _merge_results, hybrid_retrieve
+from backend.services.query_rewriter import rewrite_query
+from backend.utils.cache import get_embedding_cache, get_query_cache, set_embedding_cache, set_query_cache
 
 
 def test_query_cache_round_trip():

@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import SelfHealingMetrics from "./SelfHealingMetrics";
 
 function MarkdownMessage({ content }) {
   return (
@@ -96,6 +97,15 @@ function Chat({ messages, loading, pendingResponse, thinkingLabel }) {
                     ))}
                   </div>
                 </details>
+              ) : null}
+
+              {message.role === "assistant" && (message.eval_score !== undefined || message.retry_count !== undefined) ? (
+                <SelfHealingMetrics 
+                  evalScore={message.eval_score}
+                  retryCount={message.retry_count}
+                  selfHealingEnabled={message.self_healing_enabled}
+                  healingSteps={message.healing_steps}
+                />
               ) : null}
             </div>
           </article>

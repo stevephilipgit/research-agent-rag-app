@@ -1,3 +1,6 @@
+# Alias for test compatibility
+def retrieve_context(query: str, top_k: int = 5, session_id: Optional[str] = None) -> str:
+    return retrieve_context_with_extensions(query, top_k=top_k, session_id=session_id)
 import logging
 import math
 import os
@@ -7,19 +10,14 @@ from collections import Counter, defaultdict
 
 from langchain_core.documents import Document
 
-from services.query_rewriter import rewrite_query
-from services.context_compressor import compress_context
-from config import ENABLE_CACHE, ENABLE_HYBRID, ENABLE_REWRITE, ENABLE_COMPRESSION
-from infra.embeddings import get_embeddings
-from infra.vector_db import search_vectors, get_collection_count
-from core.reranker import rerank
-from core.telemetry import emit_log
-from utils.cache import (
-    get_embedding_cache,
-    get_query_cache,
-    set_embedding_cache,
-    set_query_cache,
-)
+from backend.services.query_rewriter import rewrite_query
+from backend.services.context_compressor import compress_context
+from backend.config.config import ENABLE_CACHE, ENABLE_HYBRID, ENABLE_REWRITE, ENABLE_COMPRESSION
+from backend.infra.embeddings import get_embeddings
+from backend.infra.vector_db import search_vectors, get_collection_count
+from backend.core.reranker import rerank
+from backend.core.telemetry import emit_log
+from backend.utils.cache import get_embedding_cache, get_query_cache, set_embedding_cache, set_query_cache
 
 logger = logging.getLogger(__name__)
 
