@@ -83,6 +83,13 @@ async def startup():
     except Exception as e:
         print(f"Startup Qdrant check failed: {e}")
 
+    # Supabase connection log and test
+    try:
+        from infra.storage import _get_client
+        _get_client()
+    except Exception as e:
+        logger.error(f"Supabase startup check failed: {e}")
+
 
 @app.get("/")
 def health():
