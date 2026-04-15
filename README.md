@@ -160,4 +160,57 @@ npm run dev
 
 ---
 
+## 🆕 April 2026: Latest Upgrades & Changes
+
+### Backend & Self-Healing Layer
+- **Self-Healing Layer**: Now production-grade, with adaptive retries, evaluation scoring, and model fallback. See `backend/services/self_healing.py` and `SELF_HEALING.md` for details.
+- **Evaluation Engine**: LLM-based and heuristic scoring, with early stopping and retry logic.
+- **Adaptive Retrieval & Model Fallback**: Dynamically adjusts retrieval parameters and model selection based on response quality.
+- **Metrics Logging**: Tracks evaluation scores, retry attempts, and latency for every response.
+- **.env.example**: Now included for safe environment setup (no secrets committed).
+- **requirements.txt**: Updated with `langgraph`, `apscheduler`, and other dependencies.
+
+### Frontend
+- **Self-Healing Metrics Panel**: Collapsible UI shows response quality, retry count, and optimization steps (`SelfHealingMetrics.jsx`).
+- **Toast Notifications**: Improved, responsive, and accessible notifications for all error/success states.
+- **Mobile & UX Upgrades**: Sticky input bar, loaders, and responsive design for all devices.
+
+### Testing & Safety
+- **E2E & Integration Tests**: Added for self-healing and RAG pipeline.
+- **.env Handling**: `.env` is git-ignored; `.env.example` is provided for safe onboarding.
+
+---
+
+## 📝 How to Use the Self-Healing Layer
+
+1. Set `ENABLE_SELF_HEALING=true` in your `.env` (see `.env.example`).
+2. Optionally set `USE_LLM_EVAL=true` for LLM-based evaluation.
+3. All self-healing metrics and retries are visible in the frontend chat UI.
+4. See `backend/SELF_HEALING.md` for advanced configuration and flow diagrams.
+
+---
+
+## 🧩 Notable Files & Docs
+
+- `backend/services/self_healing.py`: Orchestrates self-healing flow.
+- `backend/services/eval_engine.py`: Evaluation logic.
+- `backend/services/decision_engine.py`: Accept/improve/retry logic.
+- `backend/services/strategy_manager.py`: Query adaptation strategies.
+- `backend/SELF_HEALING.md`: Full documentation and flow diagrams.
+- `frontend/src/components/SelfHealingMetrics.jsx`: Frontend metrics panel.
+- `.env.example`: Safe template for environment variables.
+- `backend/requirements.txt`: All dependencies.
+
+---
+
+## ⚡ Quickstart (Post-Upgrade)
+
+1. Copy `.env.example` to `.env` and fill in your keys.
+2. Install backend and frontend dependencies as before.
+3. Start backend and frontend servers.
+4. Open the app and verify self-healing metrics in chat responses.
+5. Run tests in `tests/` for validation.
+
+---
+
 **Developed with 💡 for High-Accuracy Environments by Steve Philip**
