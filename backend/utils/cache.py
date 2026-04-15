@@ -3,7 +3,7 @@ import os
 import json
 import logging
 from typing import Optional, Any
-from config.settings import ENABLE_CACHE
+from backend.config.settings import ENABLE_CACHE
 
 logger = logging.getLogger(__name__)
 

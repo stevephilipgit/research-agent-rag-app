@@ -3,7 +3,7 @@ import math
 import re
 from typing import List, Optional, Callable
 from langchain_core.embeddings import Embeddings
-from config.settings import EMBEDDING_DIMENSION
+from backend.config.settings import EMBEDDING_DIMENSION
 
 class LocalHashEmbeddings(Embeddings):
     """Deterministic offline embeddings so ingestion works without network access."""

@@ -24,7 +24,8 @@ export default function Toast({ toasts, removeToast }) {
       display: "flex",
       flexDirection: "column",
       gap: "10px",
-      maxWidth: "380px",
+      maxWidth: "calc(100% - 40px)",
+      pointerEvents: "none",
     }}>
       {toasts.map((toast) => (
         <ToastItem key={toast.id} toast={toast} onClose={() => removeToast(toast.id)} />
@@ -50,13 +51,16 @@ function ToastItem({ toast, onClose }) {
       alignItems: "flex-start",
       gap: "10px",
       animation: "slideIn 0.3s ease",
+      pointerEvents: "all",
+      minWidth: "280px",
+      maxWidth: "100%",
     }}>
-      <span style={{ fontSize: "18px" }}>{ICONS[toast.type]}</span>
-      <div style={{ flex: 1 }}>
-        <div style={{ fontWeight: "600", fontSize: "14px", marginBottom: "4px", color: "#222" }}>
+      <span style={{ fontSize: "18px", flexShrink: 0 }}>{ICONS[toast.type]}</span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: "600", fontSize: "14px", marginBottom: "4px", color: "#222", wordWrap: "break-word" }}>
           {toast.title}
         </div>
-        <div style={{ fontSize: "13px", color: "#555", lineHeight: "1.4" }}>
+        <div style={{ fontSize: "13px", color: "#555", lineHeight: "1.4", wordWrap: "break-word" }}>
           {toast.message}
         </div>
       </div>
@@ -68,6 +72,9 @@ function ToastItem({ toast, onClose }) {
         color: "#999",
         padding: "0",
         lineHeight: "1",
+        flexShrink: 0,
+        minWidth: "24px",
+        height: "24px",
       }}>×</button>
     </div>
   );

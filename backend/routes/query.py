@@ -42,7 +42,7 @@ def query_endpoint(
     if not session_id:
         session_id = payload.session_id or "default"
     try:
-        return query_agent(payload.query, session_id)
+        return query_agent(payload.query, session_id, payload.enable_self_healing)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -58,7 +58,7 @@ def query_stream_endpoint(
         session_id = payload.session_id or "default"
     def event_stream():
         try:
-            for event in stream_query_events(payload.query, session_id):
+            for event in stream_query_events(payload.query, session_id, payload.enable_self_healing):
                 yield f"event: {event['type']}\n"
                 yield f"data: {json.dumps(event['data'])}\n\n"
         except Exception as exc:

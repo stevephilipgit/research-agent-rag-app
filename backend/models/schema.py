@@ -17,11 +17,15 @@ class ChatMessage(BaseModel):
     content: str
     steps: List[dict] = Field(default_factory=list)
     citations: List[dict] = Field(default_factory=list)
+    eval_score: Optional[float] = None
+    retry_count: int = 0
+    self_healing_enabled: bool = False
 
 
 class QueryRequest(BaseModel):
     query: str
     session_id: str = "default"
+    enable_self_healing: bool = False
 
 
 class QueryResponse(BaseModel):
@@ -31,6 +35,9 @@ class QueryResponse(BaseModel):
     messages: List[ChatMessage] = Field(default_factory=list)
     logs: List[LogEntry] = Field(default_factory=list)
     debug: dict = Field(default_factory=dict)
+    eval_score: Optional[float] = None
+    retry_count: int = 0
+    self_healing_enabled: bool = False
 
 
 class DocumentEntry(BaseModel):

@@ -54,7 +54,7 @@ export const sendQuery = async (query) => {
   return data;
 };
 
-export const streamQuery = async ({ query, onEvent, onError }) => {
+export const streamQuery = async ({ query, onEvent, onError, enableSelfHealing = false }) => {
   try {
     const response = await fetch(`${resolveApiBase()}/api/query/stream`, {
       method: "POST",
@@ -62,7 +62,7 @@ export const streamQuery = async ({ query, onEvent, onError }) => {
         "Content-Type": "application/json",
         "X-Session-ID": getSessionId(),
       },
-      body: JSON.stringify({ query }),
+      body: JSON.stringify({ query, enable_self_healing: enableSelfHealing }),
     });
 
     if (!response.ok || !response.body) {

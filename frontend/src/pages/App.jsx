@@ -35,6 +35,7 @@ function App() {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [pendingResponse, setPendingResponse] = useState("");
   const [uploadState, setUploadState] = useState({ status: "", files: [] });
+  const [selfHealingMode, setSelfHealingMode] = useState(false);
   const fileInputRef = useRef(null);
   const { toasts, removeToast, toast } = useToast();
 
@@ -188,8 +189,14 @@ function App() {
       if ((data.uploaded_files || []).length > 0) {
         toast.success(
           "Upload Successful",
-          `${data.uploaded_files.length} file(s) uploaded and indexed successfully.`,
+          `${data.uploaded_files.length} file(s) indexed and ready for queries.`,
           4000
+        );
+      } else {
+        toast.warning(
+          "No New Files",
+          "The uploaded files were duplicates or invalid.",
+          3000
         );
       }
     } catch (err) {
@@ -263,6 +270,7 @@ function App() {
     try {
       await streamQuery({
         query: trimmed,
+        enableSelfHealing: selfHealingMode,
         onEvent: ({ type, data }) => {
           if (type === "meta" && data?.logs) {
             setLogs(data.logs);
@@ -270,6 +278,18 @@ function App() {
 
           if (type === "token") {
             setPendingResponse((prev) => `${prev}${data}`);
+          }
+
+          if (type === "self_healing_step") {
+            // Update the last message with healing step info
+            setMessages((prev) => {
+              if (prev.length === 0) return prev;
+              const updated = [...prev];
+              const lastMsg = updated[updated.length - 1];
+              if (!lastMsg.healing_steps) lastMsg.healing_steps = [];
+              lastMsg.healing_steps.push(data);
+              return updated;
+            });
           }
 
           if (type === "done") {
@@ -342,6 +362,13 @@ function App() {
   };
 
   const handleNewChat = async () => {
+    // Show processing notification
+    toast.warning(
+      "Session Clearing",
+      "Resetting chat and clearing documents...",
+      2000
+    );
+
     // Clear UI state immediately
     setMessages([]);
     setDocuments([]);
@@ -391,6 +418,15 @@ function App() {
                 onClick={handleNewChat}
               >
                 + New Chat
+              </button>
+              <button
+                type="button"
+                className={`self-healing-toggle ${selfHealingMode ? 'active' : ''}`}
+                onClick={() => setSelfHealingMode(!selfHealingMode)}
+                aria-label="Toggle self-healing mode"
+                title="Toggle AI self-healing: enables iterative evaluation and retry"
+              >
+                {selfHealingMode ? "🤖 Self-Healing ON" : "🤖 Self-Healing OFF"}
               </button>
               <button
                 type="button"
@@ -452,7 +488,7 @@ function App() {
               type="submit"
               disabled={loading || uploading || !query.trim() || serverStatus !== "ready"}
             >
-              {loading ? "Thinking..." : "Send"}
+              {uploading ? "Uploading..." : loading ? "Processing..." : "Send"}
             </button>
           </form>
         </main>
