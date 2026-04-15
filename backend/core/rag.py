@@ -1,4 +1,5 @@
 # Alias for test compatibility
+from typing import Optional, List, Dict
 def retrieve_context(query: str, top_k: int = 5, session_id: Optional[str] = None) -> str:
     return retrieve_context_with_extensions(query, top_k=top_k, session_id=session_id)
 import logging
