@@ -1,7 +1,9 @@
-# Env
+# ===== Environment =====
 .env
 .env.*
-# Python
+!.env.example
+
+# ===== Python =====
 venv/
 .venv/
 __pycache__/
@@ -12,7 +14,7 @@ __pycache__/
 dist/
 build/
 
-# HuggingFace / sentence-transformers cache
+# ===== HuggingFace / sentence-transformers cache =====
 sentence_transformers/
 .cache/
 hf_cache/
@@ -20,31 +22,36 @@ huggingface/
 **/sentence_transformers/
 **/.cache/
 
-# Vector store
+# ===== Vector store =====
 backend/vector_store/
+qdrant_local_storage/
+vector_store/
 *.index
 *.faiss
 *.pkl
 
-# Data
+# ===== Data / Uploads (never commit user-uploaded content or generated registries) =====
 backend/data/uploads/
 backend/data/processed/
+backend/data/doc_registry.json
+data/uploads/
+data/processed/
+data/testdocs/
+*.tmp
 
-# Logs
+# ===== Logs =====
+logs/
 backend/logs/
 *.log
 
-# Env
-.env
-.env.*
-
-# Node
+# ===== Node =====
+node_modules/
 frontend/node_modules/
 frontend/dist/
 
-# Cleanup audit (local only, preserved from prior settings to be safe)
+# ===== Cleanup audit (local only) =====
 _cleanup/
 
-# OS
+# ===== OS =====
 .DS_Store
 Thumbs.db
