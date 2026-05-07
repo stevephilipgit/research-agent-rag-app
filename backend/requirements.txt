@@ -8,6 +8,7 @@ langchain-openai
 qdrant-client>=1.7.0
 python-dotenv
 sentence-transformers
+scikit-learn
 torch==2.4.0
 --extra-index-url https://download.pytorch.org/whl/cpu
 slowapi
@@ -19,10 +20,12 @@ pypdf
 python-docx
 docx2txt
 tavily-python
-httpx
+httpx==0.25.2
 beautifulsoup4
 unstructured
-supabase
+supabase==2.3.4
+gotrue==2.8.1
+postgrest==0.15.1
 upstash-redis
 apscheduler
 psutil

@@ -6,6 +6,8 @@ services:
     startCommand: cd backend && uvicorn main:app --host 0.0.0.0 --port $PORT
     plan: free
     envVars:
+      - key: ENVIRONMENT
+        value: production
       - key: GROQ_API_KEY
         sync: false
       - key: TAVILY_API_KEY
@@ -51,4 +53,4 @@ services:
     plan: free
     envVars:
       - key: VITE_API_URL
-        value: https://research-assistant-backend.onrender.com
+        sync: false
