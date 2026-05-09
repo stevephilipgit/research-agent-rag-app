@@ -23,8 +23,13 @@ class ChatMessage(BaseModel):
 
 
 class QueryRequest(BaseModel):
-    query: str
-    session_id: str = "default"
+    query: str = Field(..., min_length=1, max_length=2000, description="User query text")
+    session_id: str = Field(
+        default="default",
+        max_length=64,
+        pattern=r"^[a-zA-Z0-9\-_]+$",
+        description="Session identifier (alphanumeric, hyphens, underscores)",
+    )
     enable_self_healing: bool = False
 
 
@@ -41,11 +46,12 @@ class QueryResponse(BaseModel):
 
 
 class DocumentEntry(BaseModel):
-    doc_id: str
-    file_name: str
-    upload_time: float
-
-
+    id: str
+    filename: str
+    status: str = "pending"
+    vector_count: int = 0
+    topic: Optional[str] = None
+    created_at: Optional[str] = None
 class UploadResponse(BaseModel):
     status: str
     uploaded_files: List[str] = Field(default_factory=list)

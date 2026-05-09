@@ -18,6 +18,7 @@ def _get_client():
     key = os.getenv("SUPABASE_KEY")
     masked_key = key[:4] + "..." + key[-4:] if key and len(key) > 8 else "(missing)"
     logger.info(f"SUPABASE_URL: {url}")
+
     logger.info(f"SUPABASE_KEY: {masked_key}")
 
     if not url or not key:
@@ -25,15 +26,26 @@ def _get_client():
         return None
 
     try:
-        from supabase import create_client
-        client = create_client(url, key)
+        import httpx
+        from supabase import create_client, Client
+        from supabase.lib.client_options import ClientOptions
+        client: Client = create_client(
+            supabase_url=url,
+            supabase_key=key,
+            options=ClientOptions(
+                http_client=httpx.Client(
+                    transport=httpx.HTTPTransport(retries=3),
+                    timeout=30.0
+                )
+            )
+        )
         # Connection test
         try:
             client.storage.list_buckets()
             logger.info(f"Supabase connection test succeeded: {url}")
         except Exception as test_exc:
-            logger.error(f"Supabase connection test failed for {url}: {test_exc}")
-            return None
+            logger.warning(f"Supabase connection test failed for {url}: {test_exc}")
+            logger.warning("Proceeding with initialized Supabase client; operations will retry at call time.")
         _supabase_client = client
         return _supabase_client
     except Exception as exc:
