@@ -2,6 +2,8 @@ import logging
 import operator
 import re
 from typing import Annotated, Iterator, TypedDict
+import numpy as np
+from sklearn.metrics.pairwise import cosine_similarity
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.graph import StateGraph
@@ -34,6 +36,7 @@ from utils.sanitize import safe_llm_call, safe_tool_call
 from utils.streaming import safe_stream
 
 logger = logging.getLogger(__name__)
+GROUNDING_COSINE_THRESHOLD = 0.25
 
 
 class AgentState(TypedDict):
@@ -140,21 +143,27 @@ def clean_context(text: str) -> str:
 
 
 def is_valid_answer(answer: str, context: str) -> bool:
-    """Checks if the answer has meaningful overlap with the source context."""
+    """Checks if the answer is semantically grounded in source context."""
     if not answer or len(answer) < 10:
         return False
     if not context:
         return False
-    
-    # Simple word overlap check
-    answer_words = set(re.findall(r"\w+", answer.lower()))
-    context_words = set(re.findall(r"\w+", context.lower()))
-    
-    # Filter common stop words for better validation
-    stop_words = {"the", "a", "an", "is", "are", "and", "or", "in", "on", "at", "to", "for", "with", "this", "that"}
-    overlap = (answer_words & context_words) - stop_words
-    
-    return len(overlap) > 3
+    try:
+        from infra.embeddings import get_embeddings
+
+        embedder = get_embeddings()
+        if hasattr(embedder, "encode"):
+            context_emb = embedder.encode([context])
+            answer_emb = embedder.encode([answer])
+        else:
+            context_emb = np.array([embedder.embed_query(context)])
+            answer_emb = np.array([embedder.embed_query(answer)])
+        score = cosine_similarity(context_emb, answer_emb)[0][0]
+        logger.info(f"Grounding cosine score: {score:.4f} (threshold: {GROUNDING_COSINE_THRESHOLD})")
+        return float(score) >= GROUNDING_COSINE_THRESHOLD
+    except Exception as exc:
+        logger.warning(f"Cosine validation failed: {exc}")
+        return False
 
 
 def _dedupe_citations(citations: list[dict]) -> list[dict]:
@@ -324,7 +333,7 @@ def run_research_agent(query: str, history_messages=None, session_id: str = "def
             
             # Fix 8: Safe Response Validation
             if not is_valid_answer(final_answer, tool_context):
-                emit_log("Grounding", "failure", "Answer failed overlap validation", "query")
+                emit_log("Grounding", "failure", "Answer failed cosine grounding validation", "query")
                 final_answer = "Answer not found in uploaded documents."
 
             # [NEW] Grounding Validator (optional/extra check)
@@ -332,8 +341,22 @@ def run_research_agent(query: str, history_messages=None, session_id: str = "def
                 # Create dummy doc list for validator
                 from langchain_core.documents import Document as LC_Document
                 v_docs = [LC_Document(page_content=tool_context)]
-                if not validate_answer(final_answer, v_docs):
-                    final_answer = "The generated answer could not be verified against the provided documents. [Grounding check failed]"
+                validation_result = validate_answer(final_answer, v_docs)
+                
+                # Handle different return types
+                if isinstance(validation_result, dict):
+                    # Dict with warning - don't override, just log warning
+                    logger.warning(f"Grounding validation returned warning: {validation_result.get('warning')}")
+                    emit_log("Grounding", "warning", validation_result.get('warning', 'Low confidence in answer'), "query")
+                elif not validation_result:
+                    # False - reject and use fallback
+                    logger.warning(f"Grounding validation rejected answer: '{final_answer[:100]}'")
+                    final_answer = "I couldn't find relevant information to answer your question based on the provided documents."
+                    emit_log("Grounding", "failure", "Answer rejected after cosine similarity check", "query")
+                else:
+                    # True - validation passed
+                    logger.info(f"Grounding validation passed for answer: '{final_answer[:100]}'")
+                    emit_log("Grounding", "success", "Answer validated successfully", "query")
 
         except Exception as exc:
             logger.error(f"Synthesis failed: {exc}", exc_info=True)
@@ -391,13 +414,14 @@ def run_research_agent_stream(query: str, history_messages=None, session_id: str
     cached_static = get_cached_response(query, session_id=session_id)
     if cached_static:
         yield {"type": "token", "data": cached_static}
+        cached_res = {
+            "answer": cached_static,
+            "steps": [{"type": "answer", "label": "Cache hit", "detail": "Served from response cache"}],
+            "citations": [],
+        }
         yield {
             "type": "done",
-            "data": {
-                "answer": cached,
-                "steps": [{"type": "answer", "label": "Cache hit", "detail": "Served from response cache"}],
-                "citations": [],
-            },
+            "data": cached_res,
         }
         return
 
@@ -443,7 +467,7 @@ def run_research_agent_stream(query: str, history_messages=None, session_id: str
 
             # Fix 8: Safe Response Validation for streaming
             if not is_valid_answer(final_answer, tool_context):
-                emit_log("Grounding", "failure", "Streamed answer failed overlap validation", "query")
+                emit_log("Grounding", "failure", "Streamed answer failed cosine grounding validation", "query")
                 # We can't really "undo" the stream, but we can append a warning or override the final_answer for the record
                 final_answer = "Answer not found in uploaded documents."
 
@@ -451,9 +475,20 @@ def run_research_agent_stream(query: str, history_messages=None, session_id: str
             if ENABLE_VALIDATION:
                 from langchain_core.documents import Document as LC_Document
                 v_docs = [LC_Document(page_content=tool_context)]
-                if not validate_answer(final_answer, v_docs):
-                    emit_log("Grounding", "failure", "Generated answer rejected by grounding validator.", "query")
-                    final_answer = "Answer not found in uploaded documents. [Grounding check failed]"
+                validation_result = validate_answer(final_answer, v_docs)
+                
+                if isinstance(validation_result, dict):
+                    # Dict with warning - log but keep answer
+                    logger.warning(f"Streaming: Grounding validation returned warning: {validation_result.get('warning')}")
+                    emit_log("Grounding", "warning", validation_result.get('warning', 'Low confidence in streamed answer'), "query")
+                elif not validation_result:
+                    # False - replace with fallback
+                    logger.warning(f"Streaming: Grounding validation rejected answer")
+                    final_answer = "I couldn't find relevant information to answer your question based on the provided documents."
+                    emit_log("Grounding", "failure", "Streamed answer rejected after validation", "query")
+                else:
+                    logger.info(f"Streaming: Grounding validation passed")
+                    emit_log("Grounding", "success", "Streamed answer validated successfully", "query")
 
         elif final_answer:
             # Check direct answer too
