@@ -1,9 +1,9 @@
+import hashlib
 import json
 import os
 import sys
 import time
 import uuid
-import traceback
 from pathlib import Path
 from typing import Iterator, List
 
@@ -23,7 +23,7 @@ from config import DOCUMENTS_PATH, ROOT_DIR
 from core.document_loader import delete_document, ingest_documents
 from infra.db import load_registry, save_doc_to_registry
 from core.telemetry import emit_log, get_logs as get_structured_logs
-from services.security import validate_file
+from services.security import validate_file, sanitize_filename
 from services.self_healing import self_healing_flow, get_retrieval_params, get_model, reset_adaptive_state
 from services.metrics_service import MetricsService
 from infra.storage import upload_file, delete_file, get_file_url
@@ -39,7 +39,7 @@ _session_lock = Lock()
 
 def log_event(step: str, status: str = "success", detail: str = "", scope: str = "system") -> dict:
     entry = emit_log(step=step, status=status, detail=detail, scope=scope)
-    print(f"[{entry['time']}] {step} [{status}] {detail}".strip())
+    logger.info("[%s] %s [%s] %s", entry["time"], step, status, detail)
     return entry
 
 
@@ -52,10 +52,9 @@ def get_logs() -> List[dict]:
     return get_structured_logs()
 
 
-def get_documents(session_id: str = "default") -> List[dict]:
-    # Filter the registry to only show documents for this session
-    registry = load_registry()
-    return [doc for doc in registry if f"uploads/{session_id}/" in (doc.get("storage_path") or "")]
+async def get_documents(session_id: str = "default") -> List[dict]:
+    from infra.db import db
+    return await db.query_documents(session_id)
 
 
 def _ingestion_callback(message: str) -> None:
@@ -87,170 +86,145 @@ def _ingestion_callback(message: str) -> None:
 
 
 async def upload_documents(files: List[UploadFile], session_id: str = "default") -> dict:
-    # Addition 3: Check file count for this session from Qdrant
+    from infra.db import db
+    # Check file count for this session from Qdrant
     existing_count = get_session_document_count(session_id)
     if existing_count + len(files) > MAX_DOCS_PER_SESSION:
         log_event("File Upload", "failure", f"Max documents ({MAX_DOCS_PER_SESSION}) exceeded for session", "pipeline")
         raise HTTPException(
             status_code=429,
-            detail=f"Maximum {MAX_DOCS_PER_SESSION} documents per session allowed. You already have {existing_count}."
+            detail=f"Maximum {MAX_DOCS_PER_SESSION} documents per session allowed. You already have {existing_count}.",
         )
 
-    docs = load_registry()
-    processed_hashes = {doc.get("file_hash") for doc in docs if doc.get("file_hash")}
-    existing_names = {doc.get("file_name") for doc in docs}
-    
     saved_paths: List[str] = []
     saved_names: List[str] = []
-    debug_files: List[dict] = []
+    total_vectors = 0
+    reused_count = 0
 
     log_event("File Upload", "in_progress", f"Receiving {len(files)} file(s)", "pipeline")
 
     for file in files:
-        file_name = file.filename or "unnamed"
+        raw_name = file.filename or "unnamed"
+        file_name = sanitize_filename(raw_name)
         content = await file.read()
-        
-        # Phase 5: Duplicate Prevention via Hash Check
-        import hashlib
-        f_hash = hashlib.md5(content).hexdigest()
-        
-        if f_hash in processed_hashes:
-            log_event("File Upload", "failure", f"Duplicate content: {file_name} already exists", "pipeline")
-            continue
-            
-        if file_name in existing_names:
-            log_event("File Upload", "failure", f"Duplicate name: {file_name} already exists", "pipeline")
-            continue
-
-        # Security: File Validation & Size Check
         file_size = len(content)
+
+        # File Size and Validation
         if file_size > MAX_FILE_SIZE_MB * 1024 * 1024:
-             log_event("File Upload", "failure", f"File too large: {file_name}", "pipeline")
-             raise HTTPException(
+            log_event("File Upload", "failure", f"File too large: {file_name}", "pipeline")
+            raise HTTPException(
                 status_code=413,
-                detail=f"File {file_name} too large. Maximum size is {MAX_FILE_SIZE_MB}MB."
+                detail=f"File {file_name} is too large. Maximum size is {MAX_FILE_SIZE_MB}MB.",
             )
 
-        if not validate_file(file_name, file_size):
+        if not validate_file(file_name, file_size, content_bytes=content):
             log_event("File Upload", "failure", f"Security block: {file_name} failed validation", "pipeline")
             continue
+
+        f_hash = hashlib.sha256(content).hexdigest()
+
+        # Phase 2: Check registry first
+        existing = await db.get_by_hash(f_hash)
+
+        if existing:
+            # Re-using existing document
+            log_event("File Upload", "success", f"Duplicate file detected: {file_name} reused", "pipeline")
+            reused_count += 1
+            saved_names.append(file_name)
+            continue
+
+        # New document: create registry entry FIRST with status=pending
+        storage_path = upload_file(content, file_name, session_id=session_id)
+        if not storage_path:
+            log_event("File Upload", "failure", f"Upload failed to storage: {file_name}", "pipeline")
+            continue
             
-        doc_id = str(uuid.uuid4())
+        doc_id = await db.insert("documents", {
+            "file_hash": f_hash,
+            "filename": file_name,
+            "storage_path": storage_path,
+            "user_id": session_id,  # session_id acts as user_id for now
+            "status": "pending",
+            "document_type": "general",
+            "topic": "general"
+        })
 
         try:
-            log_event("File Upload", "in_progress", f"Uploading {file_name} to cloud storage (session: {session_id})...", "pipeline")
-            storage_path = upload_file(content, file_name, session_id=session_id)
-            public_url = get_file_url(storage_path)
-            file.file.close()
+            # Ingest to vector DB
+            # We call ingest_documents with a single path
+            result = ingest_documents([storage_path], session_id=session_id, callback=_ingestion_callback)
+            
+            if result.get("status") == "success":
+                v_count = result.get("upserted_count", 0)
+                await db.update("documents", doc_id, {
+                    "vector_count": v_count,
+                    "status": "indexed"
+                })
+                total_vectors += v_count
+                saved_paths.append(storage_path)
+                saved_names.append(file_name)
+            else:
+                await db.update("documents", doc_id, {"status": "failed"})
+                log_event("File Upload", "failure", f"Ingestion failed for {file_name}", "pipeline")
 
-            log_event("File Upload", "success", f"File saved to cloud: {storage_path}", "pipeline")
         except Exception as e:
-            logger.error(f"Upload failed: {e}")
-            log_event("File Upload", "failure", "Upload failed", "pipeline")
-            return {"status": "error", "message": "Upload failed", "logs": get_logs()}
+            await db.update("documents", doc_id, {"status": "failed"})
+            logger.exception(f"Ingestion failed for {file_name}")
 
-        save_doc_to_registry(
-            {
-                "doc_id": doc_id,
-                "file_name": file_name,
-                "file_hash": f_hash,
-                "storage_path": storage_path,
-                "public_url": public_url,
-                "upload_time": time.time(),
-            }
-        )
-
-        saved_paths.append(storage_path)
-        saved_names.append(file_name)
-        debug_files.append(
-            {
-                "doc_id": doc_id,
-                "file_name": file_name,
-                "size_bytes": file_size,
-                "storage_path": storage_path,
-                "public_url": public_url,
-            }
-        )
-
-    if not saved_paths:
-        return {
-            "status": "success",
-            "uploaded_files": [],
-            "message": "No new unique files uploaded.",
-            "documents": get_documents(),
-            "logs": get_logs(),
-        }
-
-    try:
-        logger.info(f"Starting ingestion process for {len(saved_paths)} new file(s) for session {session_id}")
-        result = ingest_documents(saved_paths, session_id=session_id, callback=_ingestion_callback)
-        logger.info(f"Ingestion completed with status: {result.get('status')}. Vector count: {result.get('vector_count')}")
-        if result.get("status") == "success":
-            log_event("File Upload", "success", "Upload & Ingestion completed", "pipeline")
-            invalidate_cache()
-        else:
-            msg = result.get("message", "Ingestion failed")
-            log_event("File Upload", "failure", msg, "pipeline")
-            return {"status": "error", "message": "Ingestion failed", "logs": get_logs()}
-    except Exception as e:
-        logger.error(f"Ingestion failed: {e}")
-        return {"status": "error", "message": "Ingestion failed", "logs": get_logs()}
-    finally:
-        # Cleanup
-        if os.path.exists(PROCESSED_PATH):
-            for fname in os.listdir(PROCESSED_PATH):
-                fpath = os.path.join(PROCESSED_PATH, fname)
-                try:
-                    if os.path.isfile(fpath):
-                        os.remove(fpath)
-                except Exception:
-                    pass
+    # Cleanup processed temp files
+    if os.path.exists(PROCESSED_PATH):
+        for fname in os.listdir(PROCESSED_PATH):
+            fpath = os.path.join(PROCESSED_PATH, fname)
+            try:
+                if os.path.isfile(fpath):
+                    os.remove(fpath)
+            except Exception:
+                pass
 
     return {
         "status": "success",
         "uploaded_files": saved_names,
-        "documents_loaded": result.get("documents_loaded", 0),
-        "vector_count": result.get("vector_count", 0),
-        "message": "Upload successful",
-        "steps": result.get("steps", []),
-        "documents": get_documents(),
+        "vector_count": total_vectors,
+        "reused_count": reused_count,
+        "message": "Upload process finished",
+        "documents": await db.query_documents(session_id),
         "logs": get_logs(),
     }
 
 
 def delete_registered_document(doc_id: str) -> dict:
     try:
-        log_event("Delete Document", "in_progress", f"Deleting document {doc_id} from cloud...", "pipeline")
-        
-        # 1. Get metadata from registry
+        log_event("Delete Document", "in_progress", f"Deleting document from cloud...", "pipeline")
+
         registry = load_registry()
         entry = next((e for e in registry if e.get("doc_id") == doc_id), None)
-        
+
         if entry:
-            # 2. Delete from Supabase Storage
+            # Delete from Supabase Storage
             storage_path = entry.get("storage_path")
             if storage_path:
                 delete_file(storage_path)
-            
-            # 3. Delete from Qdrant Vector DB
+
+            # Delete from Qdrant Vector DB
             delete_vectors_by_doc_id(doc_id)
-            
-            # 4. Remove from local JSON registry
-            delete_document(doc_id) # This call actually removes from registry
-            
-        log_event("Delete Document", "success", f"Deleted all cloud assets for {doc_id}", "pipeline")
+
+            # Remove from local JSON registry
+            delete_document(doc_id)
+
+        log_event("Delete Document", "success", "Deleted all cloud assets", "pipeline")
+        session_id = entry.get("session_id", "default") if entry else "default"
         return {
             "status": "success",
             "message": "Document deleted successfully.",
-            "documents": get_documents(getattr(entry, 'session_id', 'default')),
+            "documents": get_documents(session_id),
             "logs": get_logs(),
         }
-    except Exception as e:
-        logger.error(f"Failed to delete document {doc_id}: {e}", exc_info=True)
-        log_event("Delete Document", "failure", str(e), "pipeline")
+    except Exception:
+        logger.exception("Failed to delete document | doc_id=%s", doc_id)
+        log_event("Delete Document", "failure", "Deletion failed", "pipeline")
         return {
             "status": "error",
-            "message": f"Failed to delete: {str(e)}",
+            "message": "Failed to delete document.",
             "documents": get_documents(),
             "logs": get_logs(),
         }
@@ -261,7 +235,7 @@ def query_agent(query: str, session_id: str = "default", enable_self_healing: bo
     history_messages = []
     with _session_lock:
         session_history = _session_histories.setdefault(session_id, [])
-    
+
     for message in session_history:
         if message["role"] == "user":
             history_messages.append(HumanMessage(content=message["content"]))
@@ -269,17 +243,18 @@ def query_agent(query: str, session_id: str = "default", enable_self_healing: bo
             history_messages.append(AIMessage(content=message["content"]))
 
     vector_count = get_collection_count()
-    log_event("Query received", "success", query, "query")
+    # Strip newlines from query before logging to prevent log injection
+    safe_query_log = query.replace("\n", " ").replace("\r", " ")[:200]
+    log_event("Query received", "success", safe_query_log, "query")
     log_event("Retrieval", "in_progress", f"Number of documents in vector DB: {vector_count}", "query")
     log_event("Agent Execution", "in_progress", "Agent started", "query")
 
-    # Self-Healing Integration - respect request flag or system flag
+    # Self-Healing Integration
     eval_score = None
     retry_count = 0
     use_self_healing = ENABLE_SELF_HEALING or enable_self_healing
-    
+
     if use_self_healing:
-        # Storage for results from each attempt
         last_result = {"answer": "", "steps": [], "citations": []}
 
         def generate_answer(modified_query: str) -> str:
@@ -293,37 +268,32 @@ def query_agent(query: str, session_id: str = "default", enable_self_healing: bo
             }
             return last_result["answer"]
 
-        # Apply self-healing wrapper to answer generation
         start_time = time.time()
         answer, eval_score, retry_count = self_healing_flow(
             query=query,
             generate_fn=generate_answer,
-            context=""
+            context="",
         )
         elapsed_time = time.time() - start_time
 
-        # UPGRADE 5: Enhanced metrics with best_score, model, top_k
         retrieval_params = get_retrieval_params()
         model_used = get_model()
-        
+
         MetricsService.log_self_healing_complete(
             total_retries=retry_count,
             final_score=eval_score,
             elapsed_time=elapsed_time,
             accepted=eval_score >= 0.75,
-            best_score=eval_score,  # Will be tracked by self_healing_flow
+            best_score=eval_score,
             model_used=model_used,
-            top_k=retrieval_params.get("top_k", 5)
+            top_k=retrieval_params.get("top_k", 5),
         )
-        
-        # Reset adaptive state for next query
+
         reset_adaptive_state()
 
-        # Use answer from self-healing, but steps/citations from last attempt
         steps = last_result.get("steps", [])
         citations = last_result.get("citations", [])
     else:
-        # Original flow - no self-healing
         result = run_research_agent(query, history_messages, session_id=session_id)
         answer = result.get("answer", "") if isinstance(result, dict) else str(result)
         steps = result.get("steps", []) if isinstance(result, dict) else []
@@ -361,7 +331,7 @@ def stream_query_events(query: str, session_id: str = "default", enable_self_hea
     history_messages = []
     with _session_lock:
         session_history = _session_histories.setdefault(session_id, [])
-    
+
     for message in session_history:
         if message["role"] == "user":
             history_messages.append(HumanMessage(content=message["content"]))
@@ -369,7 +339,9 @@ def stream_query_events(query: str, session_id: str = "default", enable_self_hea
             history_messages.append(AIMessage(content=message["content"]))
 
     vector_count = get_collection_count()
-    log_event("Query received", "success", query, "query")
+    # Strip newlines from query before logging to prevent log injection
+    safe_query_log = query.replace("\n", " ").replace("\r", " ")[:200]
+    log_event("Query received", "success", safe_query_log, "query")
     log_event("Retrieval", "in_progress", f"Number of documents in vector DB: {vector_count}", "query")
     log_event("Agent Execution", "in_progress", "Streaming response started", "query")
 
@@ -382,7 +354,6 @@ def stream_query_events(query: str, session_id: str = "default", enable_self_hea
     retry_count = 0
     use_self_healing = ENABLE_SELF_HEALING or enable_self_healing
 
-    # Stream from research agent normally
     for event in run_research_agent_stream(query, history_messages, session_id=session_id):
         if event["type"] == "token":
             streamed_answer += event["data"]
@@ -405,10 +376,9 @@ def stream_query_events(query: str, session_id: str = "default", enable_self_hea
             evaluator = EvaluationEngine()
             eval_scores = evaluator.evaluate(query, streamed_answer, context="")
             eval_score = evaluator.final_score(eval_scores)
-            # For streaming, retry_count is 0 (single attempt) unless we implement retry loop
             retry_count = 0
-        except Exception as e:
-            logger.warning(f"Self-healing evaluation failed: {e}")
+        except Exception:
+            logger.warning("Self-healing evaluation failed")
             eval_score = None
 
     with _session_lock:
