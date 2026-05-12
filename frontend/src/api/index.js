@@ -1,7 +1,15 @@
 import axios from "axios";
 
-const BASE_URL =
-  (import.meta.env.VITE_API_URL || "https://research-agent-rag-app-1.onrender.com").replace(/\/$/, "");
+const _rawApiUrl = import.meta.env.VITE_API_URL || "";
+if (!import.meta.env.VITE_API_URL) {
+  // In production builds VITE_API_URL must be set; in dev the Vite proxy handles /api routing.
+  console.warn(
+    "[RAG API] VITE_API_URL is not set. " +
+      "Requests will be sent to the same origin. " +
+      "Set VITE_API_URL in your environment for production deployments."
+  );
+}
+const BASE_URL = _rawApiUrl.replace(/\/$/, "");
 
 const getSessionId = () => {
   let sessionId = sessionStorage.getItem("rag_session_id");
