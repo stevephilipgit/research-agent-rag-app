@@ -30,7 +30,8 @@ def test_merge_results_deduplicates_documents():
 
 def test_hybrid_retrieve_uses_cache_when_present():
     cached_docs = [Document(page_content="Cached result", metadata={"source": "cache"})]
-    set_query_cache("cached hybrid query", cached_docs)
+    cache_key = "cached hybrid query|s=None|src=None|topic=None|dt=None"
+    set_query_cache(cache_key, cached_docs, session_id=None)
 
     result = hybrid_retrieve("cached hybrid query", top_k=2)
 
