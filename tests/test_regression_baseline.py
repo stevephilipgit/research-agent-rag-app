@@ -1,5 +1,10 @@
-from backend.services.decision_engine import DecisionEngine
-from backend.services.eval_engine import EvaluationEngine
+"""Regression baseline tests.
+
+Tests baseline behaviors and ensures backward compatibility of
+the evaluation and decision engines.
+"""
+from services.decision_engine import DecisionEngine
+from services.eval_engine import EvaluationEngine
 
 
 def test_eval_engine_compatibility():
@@ -21,4 +26,3 @@ def test_decision_threshold_logic():
     assert engine.decide(0.74) == "improve"
     assert engine.decide(0.5) == "improve"
     assert engine.decide(0.49) == "retry"
-

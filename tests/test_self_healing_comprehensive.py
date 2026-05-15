@@ -48,7 +48,7 @@ def test_baseline_flow_disabled():
     result = generate_fn("test query")
     assert result == "Standard response"
     assert len(result) > 0
-    print("✓ TEST 1: BASELINE FLOW - PASS")
+    print("PASS TEST 1")
 
 
 # TEST 2: SELF-HEALING ENABLED
@@ -70,7 +70,7 @@ def test_self_healing_enabled():
     assert score > 0.0
     assert retries >= 0
     assert retries <= 2
-    print(f"✓ TEST 2: SELF-HEALING ENABLED - PASS (retries={retries}, score={score})")
+    print(f"PASS TEST 2: SELF-HEALING ENABLED - PASS (retries={retries}, score={score})")
 
 
 # TEST 3: EVALUATION ENGINE
@@ -87,7 +87,7 @@ def test_evaluation_engine():
     
     final = engine.final_score(scores)
     assert 0 <= final <= 1.0
-    print(f"✓ TEST 3: EVALUATION ENGINE - PASS (final_score={final})")
+    print(f"PASS TEST 3: EVALUATION ENGINE - PASS (final_score={final})")
 
 
 # TEST 4: DECISION ENGINE
@@ -98,7 +98,7 @@ def test_decision_engine():
     assert engine.decide(0.8) == "accept"
     assert engine.decide(0.6) == "improve"
     assert engine.decide(0.3) == "retry"
-    print("✓ TEST 4: DECISION ENGINE - PASS")
+    print("PASS TEST 4: DECISION ENGINE - PASS")
 
 
 # TEST 5: STRATEGY MANAGER
@@ -115,7 +115,7 @@ def test_strategy_manager():
     params = manager.expand_retrieval({"top_k": 5})
     assert params["top_k"] > 5
     assert params["top_k"] <= 15
-    print(f"✓ TEST 5: STRATEGY MANAGER - PASS (top_k={params['top_k']})")
+    print(f"PASS TEST 5: STRATEGY MANAGER - PASS (top_k={params['top_k']})")
 
 
 # TEST 6: BEST RESPONSE TRACKING
@@ -146,7 +146,7 @@ def test_best_response_tracking():
     assert response != "", f"Empty response"
     assert score > 0.0, f"Invalid score {score}"
     # Best  response should be tracked; at minimum should not crash
-    print(f"✓ TEST 6: BEST RESPONSE TRACKING - PASS (returned best response)")
+    print(f"PASS TEST 6: BEST RESPONSE TRACKING - PASS (returned best response)")
 
 
 # TEST 7: MODEL FALLBACK
@@ -163,9 +163,9 @@ def test_model_fallback():
     if score < 0.4:
         model = get_model()
         # Model might be set or None depending on flow
-        print(f"✓ TEST 7: MODEL FALLBACK - PASS (model={model})")
+        print(f"PASS TEST 7: MODEL FALLBACK - PASS (model={model})")
     else:
-        print(f"✓ TEST 7: MODEL FALLBACK - PASS (score too high for fallback)")
+        print(f"PASS TEST 7: MODEL FALLBACK - PASS (score too high for fallback)")
     
     reset_adaptive_state()
 
@@ -186,7 +186,7 @@ def test_retrieval_adaptation():
     final_top_k = final_params.get("top_k", 5)
     
     # If we had low score and retry, top_k might increase
-    print(f"✓ TEST 8: RETRIEVAL ADAPTATION - PASS (initial={initial_top_k}, final={final_top_k})")
+    print(f"PASS TEST 8: RETRIEVAL ADAPTATION - PASS (initial={initial_top_k}, final={final_top_k})")
     reset_adaptive_state()
 
 
@@ -206,9 +206,9 @@ def test_metrics_logging():
             model_used="gpt4",
             top_k=10
         )
-        print("✓ TEST 9: METRICS LOGGING - PASS (all fields accepted)")
+        print("PASS TEST 9: METRICS LOGGING - PASS (all fields accepted)")
     except TypeError as e:
-        print(f"✗ TEST 9: METRICS LOGGING - FAIL ({e})")
+        print(f"FAIL TEST 9: METRICS LOGGING - FAIL ({e})")
         raise
 
 
@@ -228,7 +228,7 @@ def test_safety_controls():
     # Should never exceed MAX_RETRIES (2)
     assert retries <= 2
     assert response != ""
-    print(f"✓ TEST 10: SAFETY CONTROLS - PASS (retries={retries}, <= 2)")
+    print(f"PASS TEST 10: SAFETY CONTROLS - PASS (retries={retries}, <= 2)")
     reset_adaptive_state()
 
 
@@ -244,9 +244,9 @@ def test_error_handling():
     try:
         response, score, retries = self_healing_flow("test", failing_fn)
         assert response != ""
-        print("✓ TEST 11: ERROR HANDLING - PASS (graceful fallback)")
+        print("PASS TEST 11: ERROR HANDLING - PASS (graceful fallback)")
     except Exception as e:
-        print(f"✗ TEST 11: ERROR HANDLING - FAIL ({e})")
+        print(f"FAIL TEST 11: ERROR HANDLING - FAIL ({e})")
         raise
 
 
@@ -274,7 +274,7 @@ def test_performance_no_unnecessary_llm():
         # Long responses should score high and not trigger many retries
         # Reasonable upper bound given MAX_RETRIES=2
         assert call_count <= 3, f"Too many calls: {call_count} (expected <= 3)"
-        print(f"✓ TEST 12: PERFORMANCE - PASS (call_count={call_count}, efficient)")
+        print(f"PASS TEST 12: PERFORMANCE - PASS (call_count={call_count}, efficient)")
     except Exception as e:
         print(f"  DEBUG ERROR in TEST 12: {e}")
         raise
@@ -309,10 +309,10 @@ if __name__ == "__main__":
             test_fn()
             passed += 1
         except Exception as e:
-            print(f"✗ {name} - FAIL: {e}")
+            print(f"FAIL {name} - FAIL: {e}")
             failed += 1
     
     print(f"\n=== RESULTS ===")
     print(f"Passed: {passed}/12")
     print(f"Failed: {failed}/12")
-    print(f"Status: {'ALL TESTS PASS ✓' if failed == 0 else f'{failed} TESTS FAILED'}\n")
+    print(f"Status: {'ALL TESTS PASS PASS' if failed == 0 else f'{failed} TESTS FAILED'}\n")
