@@ -16,9 +16,9 @@ The **AI Research Assistant** solves the "Information Overload" problem by trans
 
 ### 1. Multi-User Isolation & Security
 Built for multi-tenant environments, the platform ensures total data privacy:
-*   **Session-Scoped Data**: Every vector point and storage asset is tagged with a unique `session_id`.
-*   **Strict Filtering**: Retrieval and tool calls are forced to filter by `session_id`, preventing cross-user data leakage.
-*   **Isolated Storage**: Files are stored in session-specific cloud paths (`uploads/{session_id}/`).
+*   **Session-Scoped Data**: Every vector point and storage asset is tagged with a unique `user_id` / `session_id`.
+*   **Strict Filtering**: Retrieval and tool calls are forced to filter by `user_id`, preventing cross-user data leakage.
+*   **Isolated Storage**: Files are stored in session-specific cloud paths (`uploads/{session_id}/`) on Supabase.
 
 ### 2. Resource Protection & Guardrails
 To ensure stability and fair usage, the system implements:
@@ -26,12 +26,14 @@ To ensure stability and fair usage, the system implements:
 *   **Size Constraints**: Strict **10MB per file** limit for uploads.
 *   **Rate Limiting**: Integrated `SlowAPI` to prevent abuse (3 uploads/min, 5 queries/min).
 
-### 3. Automated Data Lifecycle
-*   **Background TTL Purge**: An integrated `APScheduler` job automatically deletes session vectors and artifacts older than **2 hours**.
-*   **Event-Driven Cleanup**: Frontend triggers an immediate session purge on tab/browser closure or when starting a "New Chat".
+### 3. Automated Data Lifecycle & Maintenance
+*   **Background Maintenance**: A dedicated `maintenance_service.py` runs periodic consistency audits between the document registry and the vector store.
+*   **Vector Audit**: Detects and remediates false-positive "missing vectors" flags by querying Qdrant with specific `doc_id` tags.
+*   **TTL Purge**: Automated background jobs delete session vectors and artifacts older than **2 hours**.
 
 ### 4. Premium UX with Real-Time Feedback
-*   **Toast Notifications**: A modern, high-visibility notification system for errors (429, 413, network), successes, and server health status.
+*   **Modern Sidebar**: Refactored sidebar with better navigation and session management.
+*   **Toast Notifications**: High-visibility notification system for errors (429, 413, network), successes, and server health status.
 *   **Live Stream Dashboard**: Real-time telemetry of the agent's internal reasoning steps and retrieval logs.
 
 ---
@@ -58,9 +60,11 @@ graph TD
     Validator --> FinalAnswer([Final Answer])
 ```
 
-### 2. Intelligent Data Integrity Layer
-*   **MD5 Bit-level Hashing**: Every file is uniquely identified by its contents, ensuring bit-perfect deduplication.
-*   **Vector Database Registry**: The `is_indexed_in_qdrant` service performs a high-speed lookup in Qdrant, skipping redundant processing.
+### 2. Infrastructure & Persistence
+*   **Vector DB (Qdrant)**: High-speed semantic search with session-aware payload filtering.
+*   **Cloud Storage (Supabase)**: Secure file storage using signed URLs for authenticated access.
+*   **Persistence (PostgreSQL)**: Robust document registry using Supabase Postgres to track ingestion states.
+*   **Caching (Upstash Redis)**: Distributed caching for session metadata and rate limiting.
 
 ### 3. Retrieval Intelligence (Hybrid Search)
 *   **Dense Search (Qdrant)**: Captures semantic meaning via high-dimensional vector embeddings.
@@ -88,70 +92,55 @@ To eliminate hallucinations, every answer passes through a rigorous **Grounding 
 
 ```plaintext
 research-assistant/
-├── docs/                 # Documentation assets and diagrams
-├── backend/              # Production-grade FastAPI Orchestrator
-│   ├── main.py           # Application entry point & APScheduler Cleanup
+├── backend/              # FastAPI Orchestrator
+│   ├── Dockerfile        # Production build context
 │   ├── core/             # Agentic Brain (LangGraph, Reranker, Telemetry)
-│   ├── services/         # Intelligence Layers (Validation, Compression, Security)
-│   ├── infra/            # Persistence (Qdrant, Supabase Storage, Redis)
-│   ├── utils/            # Resilience Helpers (SafeStreaming, Retries, Hashing)
-│   └── scripts/          # Maintenance Tools
-├── frontend/             # High-Performance Vite/React UI
-│   ├── src/              # App source (Hooks, Components, Pages)
-│   └── public/           # Static assets
-└── render.yaml           # Deployment & Production manifest
+│   ├── services/         # Intelligence (Validation, Self-Healing, Maintenance)
+│   ├── infra/            # Persistence (Qdrant, Supabase, Redis)
+│   ├── routes/           # API Endpoints
+│   └── scripts/          # Migration & Reset tools
+├── frontend/             # Vite/React UI
+│   ├── Dockerfile        # Production build context
+│   └── src/              # React source (Hooks, Components, Pages)
+├── docker-compose.yml    # Full-stack orchestration
+├── render.yaml           # Deployment manifest
+└── supabase_migration.sql # Database schema
 ```
-
-## 🛠️ Tech Stack: High-Performance Infrastructure
-
-### Frontend & Dashboard
-*   **Vite/React**: Ultra-fast core with component-based interactivity.
-*   **Tailwind CSS**: Modern styling for premium design aesthetics.
-*   **Toast UI**: Custom notification system for real-time feedback.
-
-### Backend Orchestration
-*   **FastAPI (Python 3.10-3.12)**: Asynchronous API Layer for high-concurrency.
-*   **LangGraph**: State-driven agentic reasoning (State Machine RAG).
-*   **Groq (Llama 3.1 8B)**: Near real-time inference with ultra-low latency.
-*   **APScheduler**: Automated background cleanup tasks.
-
-### Vector Intelligence & Knowledge Base
-*   **Qdrant Cloud**: Managed vector database with session-aware payload filtering.
-*   **Hybrid Search**: Dense semantic and keyword-based retrieval.
 
 ---
 
-## 📋 Requirements & Environment Variables
+## 🛠️ Tech Stack
 
-Create a `.env` file in the **`backend/`** directory:
-
-### 🔑 Essential API Keys
-*   `GROQ_API_KEY`: `your_groq_key_here`
-*   `TAVILY_API_KEY`: `your_tavily_key_here`
-*   `QDRANT_URL`: `your_qdrant_cloud_url_here`
-*   `QDRANT_API_KEY`: `your_qdrant_api_key_here`
-*   `SUPABASE_URL`: `your_supabase_project_url_here`
-*   `SUPABASE_KEY`: `your_supabase_anon_key_here`
-*   `HF_TOKEN`: `your_huggingface_read_token_here`
-
-### ⚙️ Resource Config (optional)
-*   `MAX_DOCS_PER_SESSION`: Default `5`
-*   `MAX_FILE_SIZE_MB`: Default `10`
+*   **Backend**: FastAPI, LangGraph, Pydantic v2
+*   **Frontend**: React, Vite, Tailwind CSS
+*   **AI Models**: Groq (Llama 3.1 8B), Sentence-Transformers (Local Embeddings)
+*   **Databases**: Qdrant (Vector), Supabase Postgres (Relational)
+*   **Caching**: Upstash Redis
+*   **DevOps**: Docker, Docker Compose
 
 ---
 
 ## 🚀 Setup & Installation
 
-### 1. Backend Setup
+### Option A: Docker (Recommended)
+The fastest way to get started is using Docker Compose:
+```bash
+docker-compose up --build
+```
+The backend will be available at `http://localhost:8000` and the frontend at `http://localhost:3000`.
+
+### Option B: Local Development
+
+#### 1. Backend Setup
 ```bash
 cd backend
 python -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 uvicorn main:app --reload --port 8000
 ```
 
-### 2. Frontend Setup
+#### 2. Frontend Setup
 ```bash
 cd frontend
 npm install
@@ -160,56 +149,33 @@ npm run dev
 
 ---
 
-## 🆕 April 2026: Latest Upgrades & Changes
+## 🔑 Environment Variables
 
-### Backend & Self-Healing Layer
-- **Self-Healing Layer**: Now production-grade, with adaptive retries, evaluation scoring, and model fallback. See `backend/services/self_healing.py` and `SELF_HEALING.md` for details.
-- **Evaluation Engine**: LLM-based and heuristic scoring, with early stopping and retry logic.
-- **Adaptive Retrieval & Model Fallback**: Dynamically adjusts retrieval parameters and model selection based on response quality.
-- **Metrics Logging**: Tracks evaluation scores, retry attempts, and latency for every response.
-- **.env.example**: Now included for safe environment setup (no secrets committed).
-- **requirements.txt**: Updated with `langgraph`, `apscheduler`, and other dependencies.
+Create a `.env` file in the root directory (or use individual `.env` files in `backend/` and `frontend/`):
 
-### Frontend
-- **Self-Healing Metrics Panel**: Collapsible UI shows response quality, retry count, and optimization steps (`SelfHealingMetrics.jsx`).
-- **Toast Notifications**: Improved, responsive, and accessible notifications for all error/success states.
-- **Mobile & UX Upgrades**: Sticky input bar, loaders, and responsive design for all devices.
-
-### Testing & Safety
-- **E2E & Integration Tests**: Added for self-healing and RAG pipeline.
-- **.env Handling**: `.env` is git-ignored; `.env.example` is provided for safe onboarding.
+*   `GROQ_API_KEY`: Groq Cloud API Key
+*   `TAVILY_API_KEY`: Tavily Search API Key
+*   `QDRANT_URL` & `QDRANT_API_KEY`: Qdrant Cloud credentials
+*   `SUPABASE_URL` & `SUPABASE_KEY`: Supabase project details
+*   `UPSTASH_REDIS_REST_URL` & `UPSTASH_REDIS_REST_TOKEN`: Redis caching credentials
 
 ---
 
-## 📝 How to Use the Self-Healing Layer
+## 🆕 May 2026: Latest Upgrades
 
-1. Set `ENABLE_SELF_HEALING=true` in your `.env` (see `.env.example`).
-2. Optionally set `USE_LLM_EVAL=true` for LLM-based evaluation.
-3. All self-healing metrics and retries are visible in the frontend chat UI.
-4. See `backend/SELF_HEALING.md` for advanced configuration and flow diagrams.
+### Infrastructure & DevOps
+- **Docker Support**: Full containerization for both backend and frontend with multi-stage builds.
+- **Supabase Integration**: Switched to signed URLs for secure storage access and Postgres-backed document registry.
+- **Redis Caching**: Integrated Upstash Redis for distributed session management.
 
----
+### Resilience & Maintenance
+- **Consistency Audit Service**: Added `full_consistency_audit` to resolve orphaned documents and vector synchronization issues.
+- **Deduplication Engine**: MD5-based file hashing combined with `doc_id` vector tagging ensures zero-duplicate ingestion.
+- **Self-Healing v2**: Improved evaluation scoring and adaptive retrieval strategies.
 
-## 🧩 Notable Files & Docs
-
-- `backend/services/self_healing.py`: Orchestrates self-healing flow.
-- `backend/services/eval_engine.py`: Evaluation logic.
-- `backend/services/decision_engine.py`: Accept/improve/retry logic.
-- `backend/services/strategy_manager.py`: Query adaptation strategies.
-- `backend/SELF_HEALING.md`: Full documentation and flow diagrams.
-- `frontend/src/components/SelfHealingMetrics.jsx`: Frontend metrics panel.
-- `.env.example`: Safe template for environment variables.
-- `backend/requirements.txt`: All dependencies.
-
----
-
-## ⚡ Quickstart (Post-Upgrade)
-
-1. Copy `.env.example` to `.env` and fill in your keys.
-2. Install backend and frontend dependencies as before.
-3. Start backend and frontend servers.
-4. Open the app and verify self-healing metrics in chat responses.
-5. Run tests in `tests/` for validation.
+### UI/UX Improvements
+- **Sidebar Modernization**: Refined navigation and session controls.
+- **Production Hardening**: Comprehensive security updates including XSS protection and strict input validation.
 
 ---
 
