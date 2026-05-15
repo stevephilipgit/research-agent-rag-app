@@ -9,13 +9,6 @@ import uuid
 from typing import Callable, List, Optional
 
 from langchain_core.documents import Document
-from langchain_community.document_loaders import (
-    CSVLoader,
-    Docx2txtLoader,
-    PyPDFLoader,
-    TextLoader,
-    UnstructuredWordDocumentLoader,
-)
 from config.settings import (
     DOCUMENTS_PATH,
     SUPPORTED_EXTENSIONS,
@@ -60,6 +53,13 @@ def _emit_step(callback: Optional[Callable[[str], None]], message: str) -> None:
 
 
 def _pick_loader(file_path: str):
+    from langchain_community.document_loaders import (
+        CSVLoader,
+        Docx2txtLoader,
+        PyPDFLoader,
+        TextLoader,
+        UnstructuredWordDocumentLoader,
+    )
     ext = os.path.splitext(file_path)[1].lower()
     if ext == ".pdf":
         return PyPDFLoader(file_path)

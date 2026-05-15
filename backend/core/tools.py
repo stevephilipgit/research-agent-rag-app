@@ -1,6 +1,5 @@
 import logging
 import re
-from langchain_community.document_loaders import WebBaseLoader
 from langchain.tools import tool
 
 from core.rag import retrieve_context_with_extensions
