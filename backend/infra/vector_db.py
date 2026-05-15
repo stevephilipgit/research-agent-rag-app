@@ -6,7 +6,7 @@ import builtins
 from typing import Any, Dict, List, Optional
 from qdrant_client import QdrantClient, models
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, before_sleep_log
-from backend.config.settings import (
+from config.settings import (
     ENVIRONMENT,
     QDRANT_URL,
     QDRANT_API_KEY,
@@ -72,20 +72,53 @@ def _make_client() -> QdrantClient:
     raise RuntimeError(msg)
 
 
-def is_qdrant_available():
-    return client is not None
+import threading
 
-
-client = _make_client()
-QDRANT_AVAILABLE = client is not None
-
-COLLECTION_NAME = "documents"
-
+_client_lock = threading.Lock()
+_client_instance: Optional[QdrantClient] = None
 
 def get_client() -> QdrantClient:
-    if not QDRANT_AVAILABLE:
-        raise RuntimeError("Qdrant is not available.")
-    return client
+    """Lazily initialize and return the Qdrant client. Thread-safe."""
+    global _client_instance
+    if _client_instance is not None:
+        return _client_instance
+        
+    with _client_lock:
+        if _client_instance is None:
+            # Add retry logic for local storage locks (Task: Fix locking error)
+            max_retries = 3
+            last_exc = None
+            for attempt in range(max_retries):
+                try:
+                    _client_instance = _make_client()
+                    break
+                except RuntimeError as e:
+                    if "already accessed by another instance" in str(e) and attempt < max_retries - 1:
+                        logger.warning(f"Qdrant storage locked (attempt {attempt+1}/{max_retries}). Waiting...")
+                        time.sleep(1.5)
+                        last_exc = e
+                        continue
+                    raise
+                except Exception:
+                    raise
+            
+            if _client_instance is None and last_exc:
+                raise last_exc
+                
+    return _client_instance
+
+# QDRANT_AVAILABLE is now a property or check
+def is_qdrant_available():
+    try:
+        return get_client() is not None
+    except Exception:
+        return False
+
+# For backward compatibility
+client = None # Will be initialized via get_client() where used
+
+
+COLLECTION_NAME = "documents"
 
 
 def _keyword_filter(key: str, value: str) -> models.FieldCondition:
@@ -130,7 +163,7 @@ def _build_query_filter(
 
 
 def ensure_collection_exists():
-    if not QDRANT_AVAILABLE:
+    if not is_qdrant_available():
         logger.warning("Qdrant unavailable: skipping collection check.")
         return
 
@@ -149,6 +182,7 @@ def ensure_collection_exists():
             logger.info("Qdrant collection exists | collection=%s", COLLECTION_NAME)
 
         indexes = [
+            ("doc_id", "keyword"),
             ("session_id", "keyword"),
             ("user_id", "keyword"),
             ("source", "keyword"),
@@ -168,7 +202,7 @@ def ensure_collection_exists():
 
 
 def upsert_vectors(points: List[dict], session_id: str = "default"):
-    if not QDRANT_AVAILABLE:
+    if not is_qdrant_available():
         logger.warning("Qdrant unavailable: skipping upsert.")
         return
 
@@ -191,12 +225,13 @@ def upsert_vectors(points: List[dict], session_id: str = "default"):
                 "topic": payload.get("topic", "general"),
                 "created_at": payload.get("created_at", now_ts),
                 "file_hash": payload.get("file_hash", ""),
+                "doc_id": payload.get("doc_id", ""),
                 "embedding_model": payload.get("embedding_model", "unknown"),
                 **{k: v for k, v in payload.items() if k not in {"text", "page_content", "source", "display_name"}},
             }
             normalized_points.append(models.PointStruct(id=p["id"], vector=p["vector"], payload=final_payload))
 
-        client.upsert(collection_name=COLLECTION_NAME, points=normalized_points)
+        get_client().upsert(collection_name=COLLECTION_NAME, points=normalized_points)
         logger.info(
             "Vector upsert completed | collection=%s | session_id=%s | points=%d",
             COLLECTION_NAME,
@@ -217,7 +252,7 @@ def search_vectors(
     document_type: Optional[str] = None,
     user_id: Optional[str] = None,
 ) -> List[dict]:
-    if not QDRANT_AVAILABLE:
+    if not is_qdrant_available():
         logger.warning("Qdrant unavailable: returning empty search result.")
         return []
 
@@ -239,7 +274,7 @@ def search_vectors(
     )
 
     try:
-        points = client.query_points(
+        points = get_client().query_points(
             collection_name=COLLECTION_NAME,
             query=query_vector,
             query_filter=query_filter,
@@ -272,7 +307,7 @@ def search_vectors(
 
 def delete_vectors_by_doc_id(doc_id: str):
     try:
-        client.delete(
+        get_client().delete(
             collection_name=COLLECTION_NAME,
             points_selector=models.FilterSelector(
                 filter=models.Filter(must=[models.FieldCondition(key="doc_id", match=models.MatchValue(value=doc_id))])
@@ -331,10 +366,33 @@ def is_file_hash_indexed_in_qdrant(file_hash: str, session_id: str = "default") 
         return False
 
 
+def is_doc_id_indexed_in_qdrant(doc_id: str) -> bool:
+    if not doc_id:
+        return False
+    ensure_collection_exists()
+    try:
+        c = get_client()
+        results = c.scroll(
+            collection_name=COLLECTION_NAME,
+            scroll_filter=models.Filter(
+                must=[
+                    models.FieldCondition(key="doc_id", match=models.MatchValue(value=doc_id)),
+                ]
+            ),
+            limit=1,
+            with_payload=False,
+            with_vectors=False,
+        )[0]
+        return len(results) > 0
+    except Exception as e:
+        logger.warning(f"is_doc_id_indexed_in_qdrant check failed for doc_id {doc_id}: {e}")
+        return False
+
+
 def get_session_document_count(session_id: str) -> int:
     ensure_collection_exists()
     try:
-        results = client.scroll(
+        results = get_client().scroll(
             collection_name=COLLECTION_NAME,
             scroll_filter=models.Filter(must=[models.FieldCondition(key="user_id", match=models.MatchValue(value=session_id))]),
             limit=1000,
@@ -350,7 +408,7 @@ def get_session_document_count(session_id: str) -> int:
 
 def delete_session_vectors(session_id: str):
     try:
-        client.delete(
+        get_client().delete(
             collection_name=COLLECTION_NAME,
             points_selector=models.FilterSelector(
                 filter=models.Filter(must=[models.FieldCondition(key="user_id", match=models.MatchValue(value=session_id))])
@@ -369,7 +427,7 @@ def delete_session_vectors(session_id: str):
 
 def delete_vectors_older_than(cutoff_timestamp: float):
     try:
-        client.delete(
+        get_client().delete(
             collection_name=COLLECTION_NAME,
             points_selector=models.FilterSelector(
                 filter=models.Filter(
@@ -385,7 +443,7 @@ def delete_vectors_older_than(cutoff_timestamp: float):
 def get_collection_count() -> int:
     ensure_collection_exists()
     try:
-        res = client.get_collection(COLLECTION_NAME)
+        res = get_client().get_collection(COLLECTION_NAME)
         return res.points_count
     except Exception as exc:
         logger.error(f"Failed to get Qdrant collection count: {exc}")
@@ -395,7 +453,7 @@ def get_collection_count() -> int:
 def reset_collection():
     try:
         logger.info(f"Deleting collection '{COLLECTION_NAME}'")
-        client.delete_collection(COLLECTION_NAME)
+        get_client().delete_collection(COLLECTION_NAME)
         ensure_collection_exists()
         logger.info(f"Collection '{COLLECTION_NAME}' reset successfully")
     except Exception as exc:
@@ -405,7 +463,7 @@ def reset_collection():
 
 async def cleanup_orphan_vectors():
     """Phase 5: Cleanup Qdrant vectors that have no matching document in Postgres"""
-    if not QDRANT_AVAILABLE:
+    if not is_qdrant_available():
         return
         
     from infra.db import db
@@ -418,7 +476,7 @@ async def cleanup_orphan_vectors():
         orphans = []
         offset = None
         while True:
-            res = client.scroll(
+            res = get_client().scroll(
                 collection_name=COLLECTION_NAME, 
                 offset=offset, 
                 limit=100, 
@@ -438,7 +496,7 @@ async def cleanup_orphan_vectors():
                 break
 
         if orphans:
-            client.delete(COLLECTION_NAME, PointIdsList(points=orphans))
+            get_client().delete(COLLECTION_NAME, PointIdsList(points=orphans))
             logger.info(f"Cleaned up {len(orphans)} orphan vectors")
     except Exception as exc:
         logger.error(f"Failed to cleanup orphan vectors: {exc}")

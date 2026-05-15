@@ -3,7 +3,7 @@ import os
 import json
 import logging
 from typing import Optional, Any
-from backend.config.settings import ENABLE_CACHE
+from config.settings import ENABLE_CACHE
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +21,29 @@ if REDIS_URL:
 
 # In-memory implementation for fallback
 _cache = {}
+
+# ── Document serialisation helpers ───────────────────────────────────────────
+def _serialize_docs(docs: Any) -> Any:
+    if not isinstance(docs, list):
+        return docs
+    out = []
+    for doc in docs:
+        if hasattr(doc, "page_content") and hasattr(doc, "metadata"):
+            out.append({"page_content": doc.page_content, "metadata": doc.metadata})
+        elif isinstance(doc, dict):
+            out.append(doc)
+        else:
+            out.append({"page_content": str(doc), "metadata": {}})
+    return out
+
+def _deserialize_docs(raw: Any) -> Any:
+    if not isinstance(raw, list):
+        return raw
+    try:
+        from langchain_core.documents import Document
+        return [Document(page_content=d.get("page_content", ""), metadata=d.get("metadata", {})) if isinstance(d, dict) else d for d in raw]
+    except ImportError:
+        return raw
 
 def _get_key(prefix: str, query: str, session_id: Optional[str] = None) -> str:
     combined = f"{session_id}:{query}" if session_id else query
@@ -57,10 +80,14 @@ def set_cache(query: str, value: Any, session_id: Optional[str] = None, ttl: int
     set_cache_raw(_get_key("query", query, session_id), value, ttl)
 
 def get_query_cache(query: str, session_id: Optional[str] = None) -> Optional[Any]:
-    return get_cache_raw(_get_key("query", query, session_id))
+    raw = get_cache_raw(_get_key("query", query, session_id))
+    if raw is not None:
+        return _deserialize_docs(raw)
+    return None
 
 def set_query_cache(query: str, docs: Any, session_id: Optional[str] = None):
-    set_cache_raw(_get_key("query", query, session_id), docs)
+    set_cache_raw(_get_key("query", query, session_id), _serialize_docs(docs))
+
 
 def get_embedding_cache(query: str) -> Optional[Any]:
     # Embeddings are global for the same query text

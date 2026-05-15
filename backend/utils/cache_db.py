@@ -8,11 +8,25 @@ All calls are wrapped in try/except — if Redis is down the app continues
 without caching (graceful degradation, never crashes).
 """
 import hashlib
+import json
 import logging
 import os
-from typing import Optional
+from typing import Any, List, Optional
 
 logger = logging.getLogger(__name__)
+
+# BUG 1 FIX: Import once at module load — never per-request.
+# If the package is missing we degrade gracefully without spamming logs.
+try:
+    from upstash_redis import Redis as _UpstashRedis
+    _UPSTASH_AVAILABLE = True
+except ImportError:
+    _UpstashRedis = None  # type: ignore[assignment,misc]
+    _UPSTASH_AVAILABLE = False
+    logger.warning(
+        "upstash_redis package not installed — Redis cache disabled. "
+        "Run: pip install upstash-redis>=0.15.0"
+    )
 
 _redis_client = None
 
@@ -20,6 +34,8 @@ _redis_client = None
 def _get_redis():
     """Lazily initialise the Upstash Redis client once and reuse it."""
     global _redis_client
+    if not _UPSTASH_AVAILABLE:
+        return None
     if _redis_client is not None:
         return _redis_client
 
@@ -33,13 +49,37 @@ def _get_redis():
         return None
 
     try:
-        from upstash_redis import Redis
-        _redis_client = Redis(url=url, token=token)
+        _redis_client = _UpstashRedis(url=url, token=token)
         logger.info("Upstash Redis client initialised.")
         return _redis_client
     except Exception as exc:
-        logger.warning(f"Upstash Redis unavailable, cache disabled: {exc}")
+        logger.warning(f"Upstash Redis client init failed, cache disabled: {exc}")
         return None
+
+
+# ── BUG 2 FIX: Document serialisation helpers ────────────────────────────────
+# LangChain Document objects are not JSON-serialisable; convert to plain dicts.
+
+def _serialize_docs(docs: List[Any]) -> List[dict]:
+    """Convert a list of Document objects (or plain dicts) to JSON-safe dicts."""
+    out = []
+    for doc in docs:
+        if hasattr(doc, "page_content") and hasattr(doc, "metadata"):
+            out.append({"page_content": doc.page_content, "metadata": doc.metadata})
+        elif isinstance(doc, dict):
+            out.append(doc)
+        else:
+            out.append({"page_content": str(doc), "metadata": {}})
+    return out
+
+
+def _deserialize_docs(raw: List[dict]) -> List[Any]:
+    """Reconstruct Document objects from serialised dicts."""
+    try:
+        from langchain_core.documents import Document
+        return [Document(page_content=d["page_content"], metadata=d.get("metadata", {})) for d in raw]
+    except Exception:
+        return raw  # graceful: return plain dicts if langchain unavailable
 
 
 # In-memory fallback when Redis is unavailable
@@ -105,10 +145,10 @@ def set_cached_response(
     logger.info(f"Cached response (memory) for query: {query[:50]}")
 
 
-def invalidate_cache() -> None:
+def invalidate_cache(pattern: str = "*", session_id: str = None) -> None:
     """
-    Flush ALL keys from Upstash Redis and clear the in-memory fallback.
-    Call this after new documents are ingested so stale answers are cleared.
+    Clear cache entries. 
+    Currently flushes ALL keys from Upstash Redis (global) and clears in-memory fallback.
     """
     global _memory_cache
     _memory_cache = {}
@@ -123,29 +163,39 @@ def invalidate_cache() -> None:
         logger.warning(f"Redis flush skipped (permission denied): {exc}")
 
 
-# ── Retrieval cache (kept for backward compatibility with any future callers) ──
+# ── Retrieval cache ──────────────────────────────────────────────────────────
 
-def get_cached_retrieval(query: str) -> Optional[object]:
-    """Retrieval-level cache — uses same Redis/memory backend."""
+def get_cached_retrieval(query: str) -> Optional[List[Any]]:
+    """Retrieval-level cache — deserialises Document objects on read."""
     key = _make_key(f"retrieval:{query}")
     try:
         redis = _get_redis()
         if redis is not None:
-            return redis.get(key)
+            raw = redis.get(key)
+            if raw:
+                return _deserialize_docs(json.loads(raw))
     except Exception as exc:
         logger.warning(f"Redis get failed, checking memory: {exc}")
-    return _memory_cache.get(key)
+    mem = _memory_cache.get(key)
+    if mem and isinstance(mem, list) and mem and isinstance(mem[0], dict):
+        return _deserialize_docs(mem)
+    return mem
 
 
-def set_cached_retrieval(query: str, docs: object) -> None:
-    """Store retrieval docs in cache."""
+def set_cached_retrieval(query: str, docs: Any) -> None:
+    """Store retrieval docs in cache — serialises Document objects before storing.
+
+    BUG 2 FIX: json.dumps(docs) previously crashed when docs contained
+    LangChain Document objects. We now convert them to plain dicts first.
+    """
     key = _make_key(f"retrieval:{query}")
+    serialized = _serialize_docs(docs) if isinstance(docs, list) else docs
     try:
         redis = _get_redis()
         if redis is not None:
-            import json
-            redis.set(key, json.dumps(docs) if not isinstance(docs, str) else docs, ex=3600)
+            payload = json.dumps(serialized) if not isinstance(serialized, str) else serialized
+            redis.set(key, payload, ex=3600)
             return
     except Exception as exc:
         logger.warning(f"Redis set failed, storing in memory: {exc}")
-    _memory_cache[key] = docs
+    _memory_cache[key] = serialized

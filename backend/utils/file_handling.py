@@ -2,6 +2,7 @@ import requests
 import os
 import uuid
 import logging
+import hashlib
 from config.settings import PROCESSED_PATH, MAX_FILE_SIZE
 
 logger = logging.getLogger(__name__)
@@ -24,16 +25,26 @@ def download_file(url: str) -> str:
         
         # Check size before downloading to satisfy MAX_FILE_SIZE limit
         content_length = response.headers.get('content-length')
+        content_type = response.headers.get('content-type', 'unknown')
         if content_length and int(content_length) > MAX_FILE_SIZE:
              raise ValueError(f"File too large: {content_length} bytes exceeds limit.")
              
         downloaded = 0
+        digest = hashlib.sha256()
         with open(temp_path, "wb") as f:
             for chunk in response.iter_content(chunk_size=8192):
-                downloaded += len(chunk)
-                if downloaded > MAX_FILE_SIZE:
-                    raise ValueError("File too large during download.")
-                f.write(chunk)
+                if chunk:
+                    downloaded += len(chunk)
+                    if downloaded > MAX_FILE_SIZE:
+                        raise ValueError("File too large during download.")
+                    f.write(chunk)
+                    digest.update(chunk)
+                
+        if downloaded == 0:
+            raise ValueError(f"Downloaded file is empty (0 bytes). Content-Type: {content_type}")
+            
+        checksum = digest.hexdigest()
+        logger.info(f"AUDIT: Cloud Download | Path: {temp_path} | Bytes: {downloaded} | Content-Type: {content_type} | SHA256: {checksum}")
                 
         return temp_path
     except Exception as exc:
