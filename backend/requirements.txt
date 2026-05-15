@@ -1,34 +1,53 @@
+# Web framework
 fastapi>=0.100.0
 uvicorn>=0.23.0
-langchain>=0.1.0
-langchain-community>=0.1.0
-langchain-core>=0.1.0
-langchain-groq
-langchain-openai
-qdrant-client>=1.7.0
-python-dotenv
-transformers==4.40.2
-langchain-text-splitters==0.3.3
-scikit-learn
---extra-index-url https://download.pytorch.org/whl/cpu
-torch==2.4.0+cpu
-slowapi
-tenacity
-pydantic
-pydantic-settings
 python-multipart
-pypdf
-python-docx
-docx2txt
-tavily-python
-httpx==0.25.2
-beautifulsoup4
-unstructured
+slowapi
+
+# LangChain ecosystem
+langchain>=0.2.0
+langchain-community>=0.2.0
+langchain-core>=0.2.0
+langchain-groq>=0.1.0
+langchain-openai>=0.1.0
+langchain-text-splitters==0.3.3
+langgraph>=0.2.0
+
+# Vector DB
+qdrant-client>=1.9.0
+
+# Supabase (pinned compatible set)
 supabase==2.3.4
 gotrue==2.8.1
 postgrest==0.15.1
-upstash-redis>=0.15.0
-apscheduler
-psutil
+storage3>=0.7.0
+
+# LLM / ML (CPU-only, no CUDA bloat)
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.4.0+cpu
+transformers==4.40.2
+scikit-learn
+
+# Document loaders & parsers
+pypdf>=4.0.0
+python-docx
+docx2txt
+unstructured
 pytesseract
 pdf2image
+beautifulsoup4
+
+# Search & HTTP
+tavily-python
+httpx==0.25.2
+
+# Cache
+upstash-redis>=0.15.0
+
+# Config & utilities
+python-dotenv
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+tenacity
+apscheduler
+psutil
