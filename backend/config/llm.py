@@ -1,5 +1,5 @@
 from langchain_groq import ChatGroq
-from backend.config.settings import GROQ_API_KEY, DEFAULT_MODEL, LLM_TIMEOUT, LLM_TEMPERATURE
+from config.settings import GROQ_API_KEY, DEFAULT_MODEL, LLM_TIMEOUT, LLM_TEMPERATURE
 
 def get_llm(model_name=None):
     return ChatGroq(

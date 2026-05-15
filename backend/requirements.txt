@@ -26,6 +26,8 @@ unstructured
 supabase==2.3.4
 gotrue==2.8.1
 postgrest==0.15.1
-upstash-redis
+upstash-redis>=0.15.0
 apscheduler
 psutil
+pytesseract
+pdf2image
