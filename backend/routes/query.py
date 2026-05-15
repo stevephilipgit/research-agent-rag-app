@@ -1,6 +1,5 @@
 import json
 import logging
-import re
 import uuid
 from typing import List, Optional
 
@@ -28,6 +27,7 @@ from services.rag_service import (
     upload_documents,
 )
 from services.security import validate_session_id
+from services.maintenance_service import cleanup_orphan_documents
 from core.telemetry import get_logs as get_structured_logs, subscribe, unsubscribe, wait_for_log
 from infra.vector_db import delete_session_vectors
 
@@ -120,9 +120,9 @@ async def upload_endpoint(
         return await upload_documents(files, session_id=resolved)
     except HTTPException:
         raise
-    except Exception:
+    except Exception as e:
         logger.exception("Upload endpoint error")
-        raise HTTPException(status_code=500, detail="Internal server error.")
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -149,55 +149,6 @@ async def documents_endpoint(
 # Delete endpoints — session-scoped (IDOR fix)
 # ─────────────────────────────────────────────────────────────
 
-async def _delete_document_with_session(doc_id: str, session_id: str) -> dict:
-    """
-    Delete a document only if it belongs to the requesting session.
-    Raises HTTP 403 if the document does not belong to the session.
-    Raises HTTP 404 if the document is not found.
-    """
-    from infra.db import db
-    from infra.storage import delete_file
-
-    try:
-        uuid.UUID(doc_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid document ID format.")
-
-    doc = await db.get_document(doc_id, session_id)
-    if not doc:
-        raise HTTPException(status_code=404, detail="Document not found or access denied.")
-
-    errors = []
-
-    # Step 1: delete vectors (safe to retry)
-    try:
-        delete_vectors_by_doc_id(doc_id)
-    except Exception as e:
-        errors.append(f"Qdrant: {e}")
-
-    # Step 2: delete Supabase file
-    try:
-        storage_path = doc.get("storage_path")
-        if storage_path:
-            delete_file(storage_path)
-    except Exception as e:
-        errors.append(f"Storage: {e}")
-
-    # Step 3: delete registry row only if steps 1+2 succeeded
-    if not errors:
-        await db.delete("documents", doc_id)
-    else:
-        await db.update("documents", doc_id, {"status": "delete_failed"})
-        raise HTTPException(500, detail={"errors": errors})
-
-    return {
-        "status": "success",
-        "message": "Document deleted successfully.",
-        "documents": await get_documents(session_id),
-        "logs": get_logs(),
-    }
-
-
 @router.delete("/documents/{doc_id}", response_model=DeleteResponse)
 async def delete_document_endpoint(
     doc_id: str,
@@ -205,7 +156,7 @@ async def delete_document_endpoint(
 ):
     resolved = _require_session_id(session_id)
     try:
-        return await _delete_document_with_session(doc_id, resolved)
+        return await delete_registered_document(doc_id, resolved)
     except HTTPException:
         raise
     except Exception:
@@ -220,7 +171,7 @@ async def delete_document_alias_endpoint(
 ):
     resolved = _require_session_id(session_id)
     try:
-        return await _delete_document_with_session(doc_id, resolved)
+        return await delete_registered_document(doc_id, resolved)
     except HTTPException:
         raise
     except Exception:
@@ -273,18 +224,73 @@ def logs_stream_endpoint(
 
     def event_stream():
         queue = subscribe()
+        logger.info(f"AUDIT: Log stream started for session {s_id}")
         try:
+            # Send initial snapshot
             yield "event: snapshot\n"
             yield f"data: {json.dumps(get_structured_logs())}\n\n"
+            
             while True:
-                entry = wait_for_log(queue, timeout=15.0)
-                if entry is None:
-                    yield "event: heartbeat\n"
-                    yield "data: {}\n\n"
-                    continue
-                yield "event: log\n"
-                yield f"data: {json.dumps(entry)}\n\n"
+                try:
+                    entry = wait_for_log(queue, timeout=15.0)
+                    if entry is None:
+                        # Periodic heartbeat to keep proxy alive
+                        yield "event: heartbeat\n"
+                        yield "data: {}\n\n"
+                        continue
+                    
+                    yield "event: log\n"
+                    yield f"data: {json.dumps(entry)}\n\n"
+                except Exception as loop_exc:
+                    logger.error(f"AUDIT: Error in log stream loop: {loop_exc}")
+                    yield "event: error\n"
+                    yield f"data: {json.dumps({'error': str(loop_exc)})}\n\n"
+                    break
+        except Exception as stream_exc:
+            logger.exception("AUDIT: Fatal error in log event_stream")
         finally:
+            logger.info(f"AUDIT: Log stream closed for session {s_id}")
             unsubscribe(queue)
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_stream(), 
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Disable buffering for Nginx/Proxies
+            "Access-Control-Allow-Origin": "*",
+        }
+    )
+
+
+# ─────────────────────────────────────────────────────────────
+# Admin audit endpoint
+# ─────────────────────────────────────────────────────────────
+
+@router.get("/admin/audit")
+async def admin_audit_endpoint(
+    dry_run: bool = Query(True, description="When true (default), report only — no deletions. Set false to run live cleanup."),
+):
+    """
+    Run the orphan-document audit.
+
+    - **dry_run=true** (default): Returns orphan counts and full record details
+      without modifying any data. Safe to call any time.
+    - **dry_run=false**: Executes live cleanup — deletes unrecoverable orphans
+      from the registry and marks storage-present / vector-missing records as
+      'corrupted'. Use with caution.
+
+    Records created within the last 5 minutes are always skipped regardless of
+    mode (grace period protects in-flight ingestions).
+    """
+    try:
+        result = await cleanup_orphan_documents(dry_run=dry_run)
+        return {
+            "status": "ok",
+            "mode": "dry_run" if dry_run else "live",
+            **result,
+        }
+    except Exception:
+        logger.exception("Admin audit endpoint error")
+        raise HTTPException(status_code=500, detail="Audit job failed. Check server logs.")

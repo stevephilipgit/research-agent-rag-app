@@ -21,7 +21,10 @@ def normalize_query(query: str) -> str:
     return query
 
 def rewrite_query(query: str, history=None) -> str:
-    """Fast normalization first."""
+    """Fast normalization first. Never returns an empty string."""
     normalized = normalize_query(query)
+    if not normalized:
+        logger.info(f"Query normalized to empty, falling back to original: '{query}'")
+        return query
     logger.info(f"Query normalized: '{query}' -> '{normalized}'")
     return normalized

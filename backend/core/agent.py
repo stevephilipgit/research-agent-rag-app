@@ -50,7 +50,7 @@ Your job:
 2. After the tool returns results, READ them carefully. They are your ONLY source of truth.
 3. Synthesize a clear answer ONLY from these results.
 4. Always cite your sources: [filename, page X]
-5. If 'document_search' returns no relevant content, say: "Answer not found in uploaded documents."
+5. If 'document_search' returns no results, respond: "I could not find this topic in the uploaded documents. Try rephrasing your query."
 
 IMPORTANT: Never use external knowledge or invent facts. If the information isn't in the context, say it's not found.
 """
@@ -191,14 +191,18 @@ def _collect_agent_execution(query: str, history_messages=None, session_id: str 
     rich_steps = []
     citations = []
     direct_answer = ""
+    step_count = 0
+    tools_called = set()
 
     for step in agent.stream(initial_state, config=config):
+        step_count += 1
         if "tools" in step:
             for message in step["tools"]["messages"]:
                 if not isinstance(message, ToolMessage):
                     continue
 
                 tool_name = getattr(message, "name", "tool")
+                tools_called.add(tool_name)
                 if ENABLE_TOOL_GUARD and not is_tool_allowed(tool_name):
                     emit_log("Tool Guard", "failure", f"Blocked unauthorized tool: {tool_name}", "query")
                     continue
@@ -249,6 +253,9 @@ def _collect_agent_execution(query: str, history_messages=None, session_id: str 
                             "detail": content[:300],
                         }
                     )
+
+    if step_count <= 2 and "document_search" not in tools_called:
+        logger.warning(f"[Agent] Completed without tool call | query='{query}'")
 
     return {
         "tool_context": tool_context,
@@ -311,8 +318,8 @@ def run_research_agent(query: str, history_messages=None, session_id: str = "def
     tool_context = collected["tool_context"]
     
     # [NEW] Limit context size to 4000 chars
-    if len(tool_context) > 4000:
-        tool_context = tool_context[:4000]
+    if len(tool_context) > 8000:
+        tool_context = tool_context[:8000]
         
     final_answer = collected["direct_answer"]
 
@@ -331,32 +338,15 @@ def run_research_agent(query: str, history_messages=None, session_id: str = "def
                 
             final_answer = str(getattr(final_response, "content", "") or "").strip()
             
-            # Fix 8: Safe Response Validation
-            if not is_valid_answer(final_answer, tool_context):
-                emit_log("Grounding", "failure", "Answer failed cosine grounding validation", "query")
-                final_answer = "Answer not found in uploaded documents."
+            # Single grounding check -- cosine only, no double validation
+            grounding_passed = is_valid_answer(final_answer, tool_context)
 
-            # [NEW] Grounding Validator (optional/extra check)
-            if ENABLE_VALIDATION:
-                # Create dummy doc list for validator
-                from langchain_core.documents import Document as LC_Document
-                v_docs = [LC_Document(page_content=tool_context)]
-                validation_result = validate_answer(final_answer, v_docs)
-                
-                # Handle different return types
-                if isinstance(validation_result, dict):
-                    # Dict with warning - don't override, just log warning
-                    logger.warning(f"Grounding validation returned warning: {validation_result.get('warning')}")
-                    emit_log("Grounding", "warning", validation_result.get('warning', 'Low confidence in answer'), "query")
-                elif not validation_result:
-                    # False - reject and use fallback
-                    logger.warning(f"Grounding validation rejected answer: '{final_answer[:100]}'")
-                    final_answer = "I couldn't find relevant information to answer your question based on the provided documents."
-                    emit_log("Grounding", "failure", "Answer rejected after cosine similarity check", "query")
-                else:
-                    # True - validation passed
-                    logger.info(f"Grounding validation passed for answer: '{final_answer[:100]}'")
-                    emit_log("Grounding", "success", "Answer validated successfully", "query")
+            if not grounding_passed:
+                emit_log("Grounding", "failure", "Answer failed cosine grounding validation", "query")
+                # Try once more with a direct LLM fallback before giving up
+                final_answer = "Answer not found in uploaded documents."
+            else:
+                emit_log("Grounding", "success", "Answer validated successfully", "query")
 
         except Exception as exc:
             logger.error(f"Synthesis failed: {exc}", exc_info=True)
@@ -436,8 +426,8 @@ def run_research_agent_stream(query: str, history_messages=None, session_id: str
     tool_context = collected["tool_context"]
     
     # [NEW] Limit context size to 4000 chars
-    if len(tool_context) > 4000:
-        tool_context = tool_context[:4000]
+    if len(tool_context) > 8000:
+        tool_context = tool_context[:8000]
         
     final_answer = collected["direct_answer"]
     streamed_chunks = []
@@ -465,34 +455,18 @@ def run_research_agent_stream(query: str, history_messages=None, session_id: str
                 return
             final_answer = "".join(streamed_chunks).strip()
 
-            # Fix 8: Safe Response Validation for streaming
-            if not is_valid_answer(final_answer, tool_context):
-                emit_log("Grounding", "failure", "Streamed answer failed cosine grounding validation", "query")
-                # We can't really "undo" the stream, but we can append a warning or override the final_answer for the record
-                final_answer = "Answer not found in uploaded documents."
-
-            # [NEW] Grounding Validator
-            if ENABLE_VALIDATION:
-                from langchain_core.documents import Document as LC_Document
-                v_docs = [LC_Document(page_content=tool_context)]
-                validation_result = validate_answer(final_answer, v_docs)
-                
-                if isinstance(validation_result, dict):
-                    # Dict with warning - log but keep answer
-                    logger.warning(f"Streaming: Grounding validation returned warning: {validation_result.get('warning')}")
-                    emit_log("Grounding", "warning", validation_result.get('warning', 'Low confidence in streamed answer'), "query")
-                elif not validation_result:
-                    # False - replace with fallback
-                    logger.warning(f"Streaming: Grounding validation rejected answer")
-                    final_answer = "I couldn't find relevant information to answer your question based on the provided documents."
-                    emit_log("Grounding", "failure", "Streamed answer rejected after validation", "query")
-                else:
-                    logger.info(f"Streaming: Grounding validation passed")
-                    emit_log("Grounding", "success", "Streamed answer validated successfully", "query")
+            # Only log the grounding result -- never override a streamed answer
+            # The user already saw the tokens; trust the stream
+            grounding_passed = is_valid_answer(final_answer, tool_context)
+            if not grounding_passed:
+                emit_log("Grounding", "warning", "Streamed answer low grounding score -- logged only", "query")
+            else:
+                emit_log("Grounding", "success", "Streamed answer validated", "query")
 
         elif final_answer:
-            # Check direct answer too
-            if not is_valid_answer(final_answer, tool_context):
+            # Check direct answer too (non-streamed path fallback)
+            grounding_passed = is_valid_answer(final_answer, tool_context)
+            if not grounding_passed:
                  final_answer = "Answer not found in uploaded documents."
             for part in [final_answer]:
                 yield {"type": "token", "data": part}

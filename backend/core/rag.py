@@ -14,14 +14,14 @@ from collections import defaultdict
 
 from langchain_core.documents import Document
 
-from backend.services.query_rewriter import rewrite_query
-from backend.services.context_compressor import compress_context
-from backend.config.config import ENABLE_CACHE, ENABLE_HYBRID, ENABLE_REWRITE, ENABLE_COMPRESSION
-from backend.infra.embeddings import get_embeddings
-from backend.infra.vector_db import search_vectors, get_collection_count
-from backend.core.reranker import rerank
-from backend.core.telemetry import emit_log
-from backend.utils.cache import get_embedding_cache, get_query_cache, set_embedding_cache, set_query_cache
+from services.query_rewriter import rewrite_query
+from services.context_compressor import compress_context
+from config.config import ENABLE_CACHE, ENABLE_HYBRID, ENABLE_REWRITE, ENABLE_COMPRESSION
+from infra.embeddings import get_embeddings
+from infra.vector_db import search_vectors, get_collection_count
+from core.reranker import rerank
+from core.telemetry import emit_log
+from utils.cache import get_embedding_cache, get_query_cache, set_embedding_cache, set_query_cache
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +82,18 @@ def _dense_retrieve(
         document_type=document_type,
         user_id=session_id or "default",
     )
+
+    if not results and session_id:
+        logger.warning(f"[Retrieval] Session-scoped search returned 0 results for session {session_id}, retrying globally")
+        results = search_vectors(
+            query_embedding,
+            limit=max(top_k * 4, 12),
+            session_id=session_id,
+            source_filters=source_filters,
+            topic_filters=topic_filters,
+            document_type=document_type,
+            user_id=None,
+        )
 
     docs = []
     for r in results:
@@ -163,6 +175,10 @@ def hybrid_retrieve(
     )
     bm25_docs = _bm25_retrieve(query, top_k=top_k)
     merged_docs = _merge_results(dense_docs, bm25_docs, top_k=top_k)
+
+    if len(merged_docs) == 0 and len(dense_docs) > 0:
+        logger.warning("[Retrieval] Hybrid returned 0 results, falling back to dense-only")
+        merged_docs = dense_docs
 
     emit_log(
         "Retrieval",

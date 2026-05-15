@@ -3,8 +3,8 @@ import os
 import threading
 import time
 
-from backend.core.telemetry import emit_log
-from backend.config.settings import ENABLE_RERANKER
+from core.telemetry import emit_log
+from config.settings import ENABLE_RERANKER
 
 logger = logging.getLogger(__name__)
 

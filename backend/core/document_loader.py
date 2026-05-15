@@ -30,11 +30,11 @@ from infra.vector_db import (
     get_collection_count,
     is_indexed_in_qdrant,
     is_file_hash_indexed_in_qdrant,
+    is_qdrant_available,
 )
-from infra.vector_db import QDRANT_AVAILABLE
 from infra.db import load_registry, remove_from_registry
 from utils.file_handling import download_file, is_url
-from infra.storage import get_file_url
+from infra.storage import get_signed_file_url
 
 logger = logging.getLogger(__name__)
 
@@ -128,11 +128,9 @@ def _detect_topics(text: str, source: str) -> list[str]:
 def load_documents(
     file_paths: List[str],
     session_id: str = "default",
+    doc_id: Optional[str] = None,
     callback: Optional[Callable[[str], None]] = None,
 ) -> List[Document]:
-    registry = load_registry()
-    registry_by_name = {d.get("filename", d.get("file_name")): d.get("id", d.get("doc_id")) for d in registry}
-
     documents: List[Document] = []
     processed_paths = set()
 
@@ -143,16 +141,22 @@ def load_documents(
         processed_paths.add(path)
 
         file_path = path
+        original_name = _normalize_source_name(path)  # derived early so it's available in all branches
         is_temp = False
         try:
             if path.startswith("uploads/"):
                 _emit_step(callback, f"Fetching cloud document: {path}")
-                public_url = get_file_url(path)
-                file_path = download_file(public_url)
+                try:
+                    signed_url = get_signed_file_url(path)
+                except Exception as signed_exc:
+                    raise ValueError(f"Could not fetch signed URL for {path}: {signed_exc}")
+                file_path = download_file(signed_url)
+                original_name = _normalize_source_name(path)  # keep cloud path basename
                 is_temp = True
             elif is_url(path):
                 _emit_step(callback, f"Downloading URL: {path}")
                 file_path = download_file(path)
+                original_name = _normalize_source_name(file_path)
                 is_temp = True
 
             if not os.path.exists(file_path):
@@ -166,15 +170,41 @@ def load_documents(
             loader = _pick_loader(file_path)
             if not loader:
                 continue
+            
+            _emit_step(callback, f"Parsing document with {type(loader).__name__}")
+            
             docs = loader.load()
+            extracted_chars = 0
+            for doc in docs:
+                cleaned = clean_text(doc.page_content)
+                doc.page_content = cleaned
+                extracted_chars += len(cleaned)
+                
+            if extracted_chars == 0:
+                ext = os.path.splitext(file_path)[1].lower()
+                if ext == ".pdf":
+                    _emit_step(callback, f"Empty text detected. Attempting OCR fallback for {original_name}...")
+                    import pytesseract
+                    from pdf2image import convert_from_path
+                    images = convert_from_path(file_path, dpi=200)
+                    ocr_text = "\n".join(pytesseract.image_to_string(img) for img in images).strip()
+                    if not ocr_text:
+                        raise ValueError(f"Document appears to be empty or unreadable even with OCR.")
+                    
+                    cleaned_ocr = clean_text(ocr_text)
+                    extracted_chars = len(cleaned_ocr)
+                    docs = [Document(page_content=cleaned_ocr, metadata={})]
+                    _emit_step(callback, f"Extracted {extracted_chars} characters via OCR successfully.")
+                else:
+                    raise ValueError(f"Extracted 0 characters. Document may be an image/scan, unsupported format, or corrupted.")
+            else:
+                _emit_step(callback, f"Extracted {extracted_chars} characters successfully.")
 
-            doc_id = registry_by_name.get(os.path.basename(file_path))
-            original_name = os.path.basename(path)
             for doc in docs:
                 doc.metadata["file_name"] = original_name
                 if doc_id:
                     doc.metadata["doc_id"] = doc_id
-                doc.page_content = clean_text(doc.page_content)
+                
             documents.extend(docs)
         except Exception as exc:
             logger.error(f"Failed to load {file_path}: {exc}")
@@ -213,6 +243,10 @@ def chunk_documents(documents: List[Document], callback: Optional[Callable[[str]
                 for chunk in create_chunks_with_overlap(section):
                     all_chunks.append(Document(page_content=chunk, metadata=metadata))
     _emit_step(callback, f"Chunks created: {len(all_chunks)}")
+    
+    if not all_chunks:
+        raise RuntimeError("Chunking resulted in 0 chunks. Document extraction failed or produced empty text.")
+        
     return all_chunks
 
 
@@ -223,7 +257,13 @@ def delete_document(doc_id: str):
     logger.info(f"Removed doc_id {doc_id} from registry")
 
 
-def ingest_documents(file_paths: Optional[List[str]] = None, file_names: Optional[List[str]] = None, session_id: str = "default", callback: Optional[Callable[[str], None]] = None) -> dict:
+def ingest_documents(
+    file_paths: Optional[List[str]] = None, 
+    file_names: Optional[List[str]] = None, 
+    session_id: str = "default", 
+    doc_id: Optional[str] = None,
+    callback: Optional[Callable[[str], None]] = None
+) -> dict:
     steps = []
 
     def record(m):
@@ -263,7 +303,7 @@ def ingest_documents(file_paths: Optional[List[str]] = None, file_names: Optiona
         if not valid_paths:
             return {"status": "success", "message": "No new unique documents to ingest.", "steps": steps, "chunks_created": 0, "file_hashes": {}}
 
-        docs = load_documents([p[0] for p in valid_paths], session_id=session_id, callback=record)
+        docs = load_documents([p[0] for p in valid_paths], session_id=session_id, doc_id=doc_id, callback=record)
 
         chunks = chunk_documents(docs, callback=record)
         now_ts = int(time.time())
@@ -312,15 +352,15 @@ def ingest_documents(file_paths: Optional[List[str]] = None, file_names: Optiona
         if not points:
             raise RuntimeError("No vectors generated from chunks; ingestion aborted.")
 
-        if not QDRANT_AVAILABLE:
+        if not is_qdrant_available():
             raise RuntimeError("Qdrant is unavailable; ingestion cannot continue.")
 
-        if points and QDRANT_AVAILABLE:
+        if points and is_qdrant_available():
             upsert_vectors(points, session_id=session_id)
             upserted_count = len(points)
             record(f"Upserted {upserted_count} vectors to Qdrant")
 
-        if QDRANT_AVAILABLE:
+        if is_qdrant_available():
             count = get_collection_count()
             record(f"VECTOR DB COUNT: {count}")
             if count == 0:

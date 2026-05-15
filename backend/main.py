@@ -1,6 +1,7 @@
 
 import sys
 import os
+import asyncio
 import psutil
 import logging
 from pathlib import Path
@@ -26,9 +27,9 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from core.reranker import warmup_reranker
 from infra.vector_db import delete_vectors_older_than, ensure_collection_exists
 from core.startup_validator import validate_startup_config, full_health_check
+from services.maintenance_service import full_consistency_audit
 from config.settings import ENVIRONMENT
 import time
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -78,40 +79,15 @@ app.add_middleware(
 
 app.include_router(query_router)
 
-def init_db():
-    logger = logging.getLogger(__name__)
-    sql = """
-    CREATE TABLE IF NOT EXISTS documents (
-        id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        file_hash     TEXT NOT NULL,
-        filename      TEXT NOT NULL,
-        storage_path  TEXT NOT NULL,
-        user_id       TEXT NOT NULL,
-        vector_ids    TEXT[] DEFAULT '{}',
-        vector_count  INTEGER DEFAULT 0,
-        status        TEXT DEFAULT 'pending',
-        document_type TEXT,
-        topic         TEXT,
-        created_at    TIMESTAMPTZ DEFAULT NOW()
-    );
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_documents_hash_user
-        ON documents (file_hash, user_id);
-    CREATE INDEX IF NOT EXISTS idx_documents_user_id
-        ON documents (user_id);
-    """
-    try:
-        from infra.storage import _get_client
-        client = _get_client()
-        if client:
-            client.rpc('exec_sql', {'query': sql}).execute()
-            logger.info("Executed init_db SQL migration successfully.")
-    except Exception as e:
-        logger.warning(f"init_db SQL migration could not be run automatically via RPC: {e}. Please ensure the tables are created manually in your Supabase SQL editor.")
+
 
 @app.on_event("startup")
 async def startup():
     logger = logging.getLogger(__name__)
     validate_startup_config()
+    
+    # Run consistency audit in background so it doesn't block startup (Task 7 & 8)
+    asyncio.create_task(full_consistency_audit())
 
     try:
         process = psutil.Process(os.getpid())
@@ -126,15 +102,6 @@ async def startup():
     
     ensure_collection_exists()
     logger.info("Qdrant collection and indexes verified on startup")
-    
-    init_db()
-
-    # Supabase connection log and test
-    try:
-        from infra.storage import _get_client
-        _get_client()
-    except Exception as e:
-        logger.exception("Supabase startup check failed: %s", e)
 
 
 @app.get("/")

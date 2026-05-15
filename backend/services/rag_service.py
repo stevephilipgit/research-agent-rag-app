@@ -19,15 +19,13 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from core.agent import run_research_agent, run_research_agent_stream
-from config import DOCUMENTS_PATH, ROOT_DIR
-from core.document_loader import delete_document, ingest_documents
-from infra.db import load_registry, save_doc_to_registry
+from core.document_loader import ingest_documents
 from core.telemetry import emit_log, get_logs as get_structured_logs
 from services.security import validate_file, sanitize_filename
 from services.self_healing import self_healing_flow, get_retrieval_params, get_model, reset_adaptive_state
 from services.metrics_service import MetricsService
-from infra.storage import upload_file, delete_file, get_file_url
-from infra.vector_db import get_collection_count, delete_vectors_by_doc_id, get_session_document_count
+from infra.storage import upload_file, delete_file, get_file_url, file_exists
+from infra.vector_db import get_collection_count, delete_vectors_by_doc_id, get_session_document_count, is_file_hash_indexed_in_qdrant
 from utils.sanitize import clean_query
 from utils.cache_db import invalidate_cache
 from config.settings import PROCESSED_PATH, MAX_DOCS_PER_SESSION, MAX_FILE_SIZE_MB, ENABLE_SELF_HEALING
@@ -106,10 +104,11 @@ async def upload_documents(files: List[UploadFile], session_id: str = "default")
     for file in files:
         raw_name = file.filename or "unnamed"
         file_name = sanitize_filename(raw_name)
+        logger.info(f"AUDIT: Received file upload | Raw: {raw_name} | Sanitized: {file_name}")
         content = await file.read()
         file_size = len(content)
 
-        # File Size and Validation
+        # File size and security validation
         if file_size > MAX_FILE_SIZE_MB * 1024 * 1024:
             log_event("File Upload", "failure", f"File too large: {file_name}", "pipeline")
             raise HTTPException(
@@ -123,53 +122,136 @@ async def upload_documents(files: List[UploadFile], session_id: str = "default")
 
         f_hash = hashlib.sha256(content).hexdigest()
 
-        # Phase 2: Check registry first
+        # ── Duplicate check ──────────────────────────────────────────────────
+        existing_doc_id = None
         existing = await db.get_by_hash(f_hash)
-
         if existing:
-            # Re-using existing document
-            log_event("File Upload", "success", f"Duplicate file detected: {file_name} reused", "pipeline")
-            reused_count += 1
-            saved_names.append(file_name)
-            continue
+            status = existing.get("status")
+            s_path = existing.get("storage_path")
+            exists_in_storage = file_exists(s_path)
+            exists_in_vectors = is_file_hash_indexed_in_qdrant(f_hash, session_id)
+            existing_doc_id = existing.get("id")
 
-        # New document: create registry entry FIRST with status=pending
-        storage_path = upload_file(content, file_name, session_id=session_id)
-        if not storage_path:
-            log_event("File Upload", "failure", f"Upload failed to storage: {file_name}", "pipeline")
-            continue
-            
-        doc_id = await db.insert("documents", {
-            "file_hash": f_hash,
-            "filename": file_name,
-            "storage_path": storage_path,
-            "user_id": session_id,  # session_id acts as user_id for now
-            "status": "pending",
-            "document_type": "general",
-            "topic": "general"
-        })
-
-        try:
-            # Ingest to vector DB
-            # We call ingest_documents with a single path
-            result = ingest_documents([storage_path], session_id=session_id, callback=_ingestion_callback)
-            
-            if result.get("status") == "success":
-                v_count = result.get("upserted_count", 0)
-                await db.update("documents", doc_id, {
-                    "vector_count": v_count,
-                    "status": "indexed"
-                })
-                total_vectors += v_count
-                saved_paths.append(storage_path)
+            if status == "indexed" and exists_in_storage and exists_in_vectors:
+                log_event("File Upload", "success", f"Duplicate file detected: {file_name} reused", "pipeline")
+                reused_count += 1
                 saved_names.append(file_name)
+                saved_paths.append(s_path)
+                continue
             else:
-                await db.update("documents", doc_id, {"status": "failed"})
-                log_event("File Upload", "failure", f"Ingestion failed for {file_name}", "pipeline")
+                log_event(
+                    "File Upload", "in_progress",
+                    f"Duplicate found but inconsistent (status={status}, storage={exists_in_storage}, "
+                    f"vectors={exists_in_vectors}). Retrying upload for {file_name}",
+                    "pipeline",
+                )
+                try:
+                    delete_vectors_by_doc_id(existing_doc_id)
+                    logger.info(f"[Upload] Deleted old vectors for doc_id={existing_doc_id} before re-ingestion")
+                except Exception as exc:
+                    logger.warning(f"[Upload] Failed to delete old vectors: {exc}")
+
+                try:
+                    await db.update("documents", existing_doc_id, {"status": "re-indexing"})
+                except Exception as exc:
+                    logger.warning(f"[Upload] Failed to update registry status: {exc}")
+
+        # ── FIX 1: Correct write order ───────────────────────────────────────
+        # Step 1 — upload to storage first; raises on any failure so DB is never touched
+        log_event("File Upload", "in_progress", f"Step 1/4 — uploading to storage: {file_name}", "pipeline")
+        try:
+            storage_path = upload_file(content, file_name, session_id=session_id)
+        except RuntimeError as storage_err:
+            log_event("File Upload", "failure", f"Upload failed to storage: {file_name} — {storage_err}", "pipeline")
+            raise HTTPException(
+                status_code=502,
+                detail=f"Storage upload failed for '{file_name}': {storage_err}. No DB record was created.",
+            )
+        if not storage_path:
+            # Defence-in-depth: shouldn't be reachable after the raise above, but guard anyway
+            log_event("File Upload", "failure", f"Upload failed to storage (empty path): {file_name}", "pipeline")
+            raise HTTPException(
+                status_code=502,
+                detail=f"Storage upload returned empty path for '{file_name}'. No DB record was created.",
+            )
+
+        # Steps 2-4 — extract text, chunk, and write vectors; roll back storage on failure
+        try:
+            doc_id = existing_doc_id or str(uuid.uuid4())
+            log_event("File Upload", "in_progress", f"Step 2/4 — extracting text and chunking: {file_name}", "pipeline")
+            # ingest_documents handles: load → chunk → embed → upsert_vectors
+            # It raises RuntimeError if 0 chunks or vectors are produced.
+            result = ingest_documents(
+                [storage_path],
+                session_id=session_id,
+                doc_id=doc_id,
+                callback=_ingestion_callback,
+            )
+
+            if result.get("status") != "success":
+                chunks_created = result.get("chunks_created", 0)
+                if chunks_created == 0:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            f"Document could not extract any text. "
+                            f"If this is a scanned PDF, OCR is required. File: {file_name}"
+                        ),
+                    )
+                raise RuntimeError(f"Ingestion failed for {file_name}: {result.get('message', 'unknown error')}")  
+
+            v_count = result.get("upserted_count", 0)
+            if v_count == 0:
+                raise RuntimeError(f"No vectors were written for {file_name}; ingestion aborted.")
+
+            log_event("File Upload", "in_progress", f"Step 3/4 — {v_count} vectors confirmed in ChromaDB/Qdrant", "pipeline")
+
+            # Step 5 — ALL preconditions met; write DB record LAST
+            log_event("File Upload", "in_progress", f"Step 4/4 — updating registry entry: {file_name}", "pipeline")
+            doc_data = {
+                "file_hash": f_hash,
+                "filename": file_name,
+                "storage_path": storage_path,
+                "storage_url": get_file_url(storage_path),
+                "user_id": session_id,
+                "status": "indexed",
+                "vector_count": v_count,
+                "document_type": "general",
+                "topic": "general",
+            }
+            if existing_doc_id:
+                await db.update("documents", existing_doc_id, doc_data)
+            else:
+                doc_data["id"] = doc_id
+                await db.insert("documents", doc_data)
+
+            total_vectors += v_count
+            saved_paths.append(storage_path)
+            saved_names.append(file_name)
+            log_event("File Upload", "success", f"Ingestion complete: {file_name} ({v_count} vectors, doc_id={doc_id})", "pipeline")
+
+        except HTTPException:
+            # Roll back storage — DB was never written
+            logger.warning(f"AUDIT: Upload pipeline failed for '{file_name}' — rolling back storage path: {storage_path}")
+            try:
+                delete_file(storage_path)
+            except Exception as del_exc:
+                logger.warning(f"AUDIT: Storage rollback failed for {storage_path}: {del_exc}")
+            raise
 
         except Exception as e:
-            await db.update("documents", doc_id, {"status": "failed"})
-            logger.exception(f"Ingestion failed for {file_name}")
+            # Roll back storage — DB was never written
+            logger.exception(f"AUDIT: Ingestion failed for '{file_name}' — rolling back storage path: {storage_path}")
+            log_event("File Upload", "failure", f"Ingestion exception: {e}", "pipeline")
+            try:
+                delete_file(storage_path)
+            except Exception as del_exc:
+                logger.warning(f"AUDIT: Storage rollback failed for {storage_path}: {del_exc}")
+            # Surface as a 500 so the caller knows exactly what happened
+            raise HTTPException(
+                status_code=500,
+                detail=f"Ingestion failed for '{file_name}': {e}",
+            )
 
     # Cleanup processed temp files
     if os.path.exists(PROCESSED_PATH):
@@ -180,6 +262,12 @@ async def upload_documents(files: List[UploadFile], session_id: str = "default")
                     os.remove(fpath)
             except Exception:
                 pass
+
+    if not saved_names and files:
+        raise HTTPException(
+            status_code=422,
+            detail="Ingestion failed for all uploaded files. Check logs for details."
+        )
 
     return {
         "status": "success",
@@ -192,40 +280,49 @@ async def upload_documents(files: List[UploadFile], session_id: str = "default")
     }
 
 
-def delete_registered_document(doc_id: str) -> dict:
+async def delete_registered_document(doc_id: str, session_id: str = "default") -> dict:
+    from infra.db import db
     try:
-        log_event("Delete Document", "in_progress", f"Deleting document from cloud...", "pipeline")
+        log_event("Delete Document", "in_progress", f"Deleting document {doc_id}...", "pipeline")
 
-        registry = load_registry()
-        entry = next((e for e in registry if e.get("doc_id") == doc_id), None)
+        doc = await db.get_document(doc_id, session_id)
+        if not doc:
+            raise Exception("Document not found or access denied")
 
-        if entry:
-            # Delete from Supabase Storage
-            storage_path = entry.get("storage_path")
-            if storage_path:
+        # Delete from Supabase Storage
+        storage_path = doc.get("storage_path")
+        if storage_path:
+            try:
                 delete_file(storage_path)
+            except Exception as e:
+                logger.warning(f"Failed to delete storage file: {e}")
 
-            # Delete from Qdrant Vector DB
+        # Delete from Qdrant Vector DB
+        try:
             delete_vectors_by_doc_id(doc_id)
+        except Exception as e:
+            logger.warning(f"Failed to delete vectors: {e}")
 
-            # Remove from local JSON registry
-            delete_document(doc_id)
+        # Remove from database
+        await db.delete("documents", doc_id)
 
-        log_event("Delete Document", "success", "Deleted all cloud assets", "pipeline")
-        session_id = entry.get("session_id", "default") if entry else "default"
+        # Invalidate cache if needed
+        invalidate_cache("*", session_id=session_id)
+
+        log_event("Delete Document", "success", "Deleted document and all related assets", "pipeline")
         return {
             "status": "success",
             "message": "Document deleted successfully.",
-            "documents": get_documents(session_id),
+            "documents": await db.query_documents(session_id),
             "logs": get_logs(),
         }
-    except Exception:
-        logger.exception("Failed to delete document | doc_id=%s", doc_id)
-        log_event("Delete Document", "failure", "Deletion failed", "pipeline")
+    except Exception as e:
+        logger.exception(f"Failed to delete document | doc_id={doc_id}")
+        log_event("Delete Document", "failure", f"Deletion failed: {e}", "pipeline")
         return {
             "status": "error",
-            "message": "Failed to delete document.",
-            "documents": get_documents(),
+            "message": f"Failed to delete document: {e}",
+            "documents": await db.query_documents(session_id),
             "logs": get_logs(),
         }
 

@@ -14,14 +14,16 @@ logger = logging.getLogger(__name__)
 def sanitize_filename(filename: str) -> str:
     """
     Sanitize an uploaded filename to prevent path traversal and injection.
-    Returns a safe, flat filename suitable for storage.
+    Returns a safe, flat filename suitable for storage with a UUID prefix.
     """
+    import uuid
     if not filename:
-        return "unnamed_upload"
+        return f"uuid_{uuid.uuid4().hex[:8]}_unnamed_upload"
 
     # Normalize unicode (NFKD) then re-encode to ASCII, dropping non-ASCII
     filename = unicodedata.normalize("NFKD", filename)
     filename = filename.encode("ascii", "ignore").decode("ascii")
+    filename = filename.lower()
 
     # Strip any path separators — take only the basename
     filename = os.path.basename(filename.replace("\\", "/").replace("..", ""))
@@ -29,8 +31,11 @@ def sanitize_filename(filename: str) -> str:
     # Remove null bytes and ASCII control characters
     filename = re.sub(r"[\x00-\x1f\x7f]", "", filename)
 
-    # Remove all characters except safe ones: word chars, dash, dot, space
-    filename = re.sub(r"[^\w\s\-.]", "", filename)
+    # Replace spaces with underscores
+    filename = filename.replace(" ", "_")
+
+    # Remove all characters except safe ones: word chars, dash, dot, underscore
+    filename = re.sub(r"[^\w\-\.]", "", filename)
 
     # Collapse multiple dots to prevent extension spoofing like "evil.exe.pdf"
     filename = re.sub(r"\.{2,}", ".", filename)
@@ -43,15 +48,15 @@ def sanitize_filename(filename: str) -> str:
         name, _, ext = filename.rpartition(".")
         ext = "." + ext.lower()[:10]  # cap extension length
         name = name[:100]
-        filename = name + ext if name else "upload" + ext
+        base_name = name + ext if name else "upload" + ext
     else:
-        filename = filename[:100]
+        base_name = filename[:100]
 
     # Final fallback
-    if not filename:
-        return "unnamed_upload"
+    if not base_name:
+        base_name = "unnamed_upload"
 
-    return filename
+    return f"uuid_{uuid.uuid4().hex[:8]}_{base_name}"
 
 
 def validate_session_id(session_id: Optional[str]) -> Optional[str]:
