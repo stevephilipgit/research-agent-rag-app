@@ -340,20 +340,27 @@ function App() {
       return;
     }
 
+    const docId = deleteTarget.id || deleteTarget.doc_id;
+    if (!docId) {
+      toast.error("Delete Failed", "Invalid document ID");
+      setDeleteTarget(null);
+      return;
+    }
+
     setError("");
     try {
-      const data = await deleteDocument(deleteTarget.doc_id);
+      const data = await deleteDocument(docId);
       setDocuments(data.documents || []);
       setLogs(data.logs || []);
       toast.success(
         "Document Deleted",
-        `"${deleteTarget.file_name}" has been removed successfully.`,
+        `"${deleteTarget.filename || deleteTarget.file_name}" has been removed successfully.`,
         3000
       );
     } catch (err) {
       toast.error(
         "Delete Failed",
-        `Could not delete "${deleteTarget.file_name}". Please try again.`,
+        `Could not delete "${deleteTarget.filename || deleteTarget.file_name}". Please try again.`,
         5000
       );
     } finally {
@@ -499,7 +506,7 @@ function App() {
       <Modal
         open={Boolean(deleteTarget)}
         title="Delete this document and its embeddings?"
-        description={deleteTarget?.file_name || ""}
+        description={deleteTarget?.filename || deleteTarget?.file_name || ""}
         cancelLabel="Cancel"
         confirmLabel="Confirm"
         onCancel={() => setDeleteTarget(null)}

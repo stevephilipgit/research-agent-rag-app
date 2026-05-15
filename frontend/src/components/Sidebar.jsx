@@ -31,22 +31,25 @@ function Sidebar({ documents, uploadState, onDeleteDocument }) {
             <div className="empty-copy">No documents uploaded yet.</div>
           ) : (
             <div className="document-stack">
-              {documents.map((doc) => (
-                <div className="document-row" key={doc.doc_id}>
+              {documents.map((doc) => {
+                const docId = doc.id || doc.doc_id;
+                const fileName = doc.filename || doc.file_name || "Unknown File";
+                return (
+                <div className="document-row" key={docId}>
                   <div className="document-meta">
                     <div className="file-icon">DOC</div>
-                    <div className="document-name">{doc.file_name}</div>
+                    <div className="document-name">{fileName}</div>
                   </div>
                   <button
                     type="button"
                     className="delete-doc-button"
-                    onClick={() => onDeleteDocument(doc)}
-                    aria-label={`Delete ${doc.file_name}`}
+                    onClick={() => onDeleteDocument({ id: docId, filename: fileName })}
+                    aria-label={`Delete ${fileName}`}
                   >
                     x
                   </button>
                 </div>
-              ))}
+              )})}
             </div>
           )}
         </section>
