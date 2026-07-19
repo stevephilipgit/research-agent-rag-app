@@ -1,6 +1,6 @@
 ## AI Research Assistant: The Ultimate Agentic RAG Platform
 
-![AI Research RAG Assistant](docs/images/hero.png)
+//![AI Research RAG Assistant](docs/images/hero.png)
 
 A high-performance, resilient, and secure **Retrieval-Augmented Generation (RAG)** engine built with **FastAPI** and **React**. This platform integrates advanced **LangGraph** orchestration, hybrid retrieval, and a multi-layered verification system to deliver industrially reliable AI research.
 
