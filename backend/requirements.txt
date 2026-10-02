@@ -43,6 +43,7 @@ httpx==0.25.2
 
 # Cache
 upstash-redis>=0.15.0
+redis>=5.0.0
 
 # Config & utilities
 python-dotenv

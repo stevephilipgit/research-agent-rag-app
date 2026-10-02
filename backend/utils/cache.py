@@ -9,14 +9,17 @@ logger = logging.getLogger(__name__)
 
 # ===== CACHE CONFIG =====
 # Redis is optional — if not installed or REDIS_URL not set, falls back to in-memory cache.
+# The `redis` package (redis-py) is required for REDIS_URL; upstash-redis serves utils/cache_db.py.
 REDIS_URL = os.getenv("REDIS_URL")
 redis_client = None
+_redis_init_error = None
 
 if REDIS_URL:
     try:
         import redis as _redis
         redis_client = _redis.Redis.from_url(REDIS_URL, decode_responses=True)
     except Exception as e:
+        _redis_init_error = f"redis initialization failed: {e}"
         logger.warning(f"Redis unavailable, using in-memory cache: {e}")
 
 # In-memory implementation for fallback
