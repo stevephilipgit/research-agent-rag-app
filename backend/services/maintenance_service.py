@@ -4,7 +4,11 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List
 from infra.db import db
 from infra.storage import file_exists, delete_file
-from infra.vector_db import delete_vectors_by_doc_id, is_doc_id_indexed_in_qdrant
+from infra.vector_db import (
+    delete_vectors_by_doc_id,
+    get_doc_vector_state,
+    probe_vector_store,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,17 +35,31 @@ async def cleanup_orphan_documents(dry_run: bool = False) -> Dict[str, Any]:
         client = _get_client()
         if not client:
             logger.error("AUDIT: Supabase client unavailable — skipping audit")
-            return {"error": "DB unavailable", "orphans_detected": 0, "cleaned_up": 0, "corrupted_detected": 0, "skipped_grace": 0}
+            return {"error": "DB unavailable", "orphans_detected": 0, "cleaned_up": 0, "corrupted_detected": 0, "skipped_grace": 0, "skipped_qdrant": 0}
         res = client.table("documents").select("*").execute()
         documents = res.data
     except Exception as e:
         logger.error(f"AUDIT: Failed to fetch documents for audit: {e}")
-        return {"error": str(e), "orphans_detected": 0, "cleaned_up": 0, "corrupted_detected": 0, "skipped_grace": 0}
+        return {"error": str(e), "orphans_detected": 0, "cleaned_up": 0, "corrupted_detected": 0, "skipped_grace": 0, "skipped_qdrant": 0}
+
+    # ── Qdrant availability gates ALL destructive reconciliation ─────────────
+    # An outage must never be interpreted as "vectors are missing": we may not
+    # mark documents corrupted, delete them, or delete vectors while Qdrant
+    # cannot confirm presence.
+    qdrant_state = probe_vector_store()
+    qdrant_available = qdrant_state["status"] == "healthy"
+    if not qdrant_available:
+        logger.error(
+            "AUDIT: QDRANT UNAVAILABLE (status=%s | detail=%s) — destructive reconciliation "
+            "skipped; no documents will be marked corrupted, deleted, or stripped of vectors.",
+            qdrant_state["status"], qdrant_state["detail"],
+        )
 
     orphans_detected = 0
     corrupted_detected = 0
     cleaned_up = 0
     skipped_grace = 0
+    skipped_qdrant = 0
     orphan_details: List[Dict[str, Any]] = []
     now_utc = datetime.now(timezone.utc)
 
@@ -74,8 +92,23 @@ async def cleanup_orphan_documents(dry_run: bool = False) -> Dict[str, Any]:
                 logger.warning(f"AUDIT: Could not parse created_at for {doc_id}: {ts_err}")
 
         # ── Storage + vector consistency checks ──────────────────────────────
+        # Tri-state vector check FIRST: "unavailable" means the presence of
+        # vectors is UNKNOWN (Qdrant outage) — never treat it as "missing".
+        if qdrant_available:
+            vector_state = get_doc_vector_state(doc_id)
+        else:
+            vector_state = "unavailable"
+
+        if vector_state == "unavailable":
+            skipped_qdrant += 1
+            logger.warning(
+                f"AUDIT: Qdrant unavailable — vector presence UNKNOWN for id={doc_id} | "
+                f"filename={filename} | status={status}. Skipping reconciliation; record left unchanged."
+            )
+            continue
+
         exists_in_storage = file_exists(storage_path)
-        exists_in_vectors = is_doc_id_indexed_in_qdrant(doc_id)
+        exists_in_vectors = vector_state == "indexed"
 
         if not exists_in_storage or not exists_in_vectors:
             reasons: List[str] = []
@@ -137,13 +170,16 @@ async def cleanup_orphan_documents(dry_run: bool = False) -> Dict[str, Any]:
         "cleaned_up": cleaned_up,
         "corrupted_detected": corrupted_detected,
         "skipped_grace": skipped_grace,
+        "skipped_qdrant": skipped_qdrant,
+        "qdrant_status": qdrant_state["status"],
         "dry_run": dry_run,
         "orphan_details": orphan_details if dry_run else [],
     }
     logger.info(
         f"AUDIT [{mode_label}]: Finished. "
         f"Detected={orphans_detected} | Cleaned={cleaned_up} | "
-        f"Corrupted={corrupted_detected} | SkippedGrace={skipped_grace}"
+        f"Corrupted={corrupted_detected} | SkippedGrace={skipped_grace} | "
+        f"SkippedQdrantUnavailable={skipped_qdrant}"
     )
     return summary
 

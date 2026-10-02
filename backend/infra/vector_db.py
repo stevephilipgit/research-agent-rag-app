@@ -507,11 +507,21 @@ def is_file_hash_indexed_in_qdrant(file_hash: str, session_id: str = "default") 
         return False
 
 
-def is_doc_id_indexed_in_qdrant(doc_id: str) -> bool:
+def get_doc_vector_state(doc_id: str) -> str:
+    """Tri-state vector presence check for reconciliation decisions.
+
+    Returns:
+        "indexed"     — Qdrant healthy, vectors confirmed present
+        "missing"     — Qdrant healthy, vectors confirmed absent
+        "unavailable" — Qdrant unavailable/timeout/auth failure: presence is
+                        UNKNOWN and must never be treated as "missing"
+    """
     if not doc_id:
-        return False
-    ensure_collection_exists()
+        return "missing"
+    if not is_qdrant_available():
+        return "unavailable"
     try:
+        ensure_collection_exists()
         c = get_client()
         results = c.scroll(
             collection_name=COLLECTION_NAME,
@@ -524,10 +534,22 @@ def is_doc_id_indexed_in_qdrant(doc_id: str) -> bool:
             with_payload=False,
             with_vectors=False,
         )[0]
-        return len(results) > 0
+        return "indexed" if results else "missing"
     except Exception as e:
-        logger.warning(f"is_doc_id_indexed_in_qdrant check failed for doc_id {doc_id}: {e}")
-        return False
+        invalidate_vector_probe()
+        status = "unavailable"
+        if _is_connectivity_error(e):
+            status, _ = _classify_probe_exception(e)
+        logger.warning(
+            "Vector presence unknown for doc_id=%s | status=%s | error=%s",
+            doc_id, status, e,
+        )
+        # Any failure to verify means we cannot confirm absence — never "missing".
+        return "unavailable"
+
+
+def is_doc_id_indexed_in_qdrant(doc_id: str) -> bool:
+    return get_doc_vector_state(doc_id) == "indexed"
 
 
 def get_session_document_count(session_id: str) -> int:
