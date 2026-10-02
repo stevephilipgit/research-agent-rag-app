@@ -145,6 +145,31 @@ def _classify_probe_exception(exc: Exception) -> Tuple[str, str]:
     return "unavailable", f"Qdrant probe failed: {combined}"
 
 
+VECTOR_UNAVAILABLE_DETAIL = "Vector search service is temporarily unavailable"
+
+
+def _is_connectivity_error(exc: Exception) -> bool:
+    """True when an exception indicates the vector service is unreachable/broken."""
+    candidates: list = [OSError, TimeoutError, socket.timeout]
+    try:
+        from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
+
+        candidates.extend([ResponseHandlingException, UnexpectedResponse])
+    except ImportError:  # pragma: no cover - defensive
+        pass
+    try:
+        import httpx
+
+        candidates.extend([httpx.TransportError, httpx.TimeoutException])
+    except ImportError:  # pragma: no cover - httpx is a hard dependency
+        pass
+    types = tuple(candidates)
+    for candidate in (exc, exc.__cause__, exc.__context__):
+        if candidate is not None and isinstance(candidate, types):
+            return True
+    return False
+
+
 def _run_probe(timeout: float) -> Tuple[str, str]:
     if _IS_DEVELOPMENT:
         # In-process embedded store: reuse the shared client (fast, no network).
@@ -349,10 +374,22 @@ def search_vectors(
     user_id: Optional[str] = None,
 ) -> List[dict]:
     if not is_qdrant_available():
-        logger.warning("Qdrant unavailable: returning empty search result.")
-        return []
+        # Never treat an unavailable vector store as an empty, successful
+        # retrieval — surface it so the API boundary can return 503.
+        raise VectorServiceUnavailable(VECTOR_UNAVAILABLE_DETAIL)
 
-    ensure_collection_exists()
+    try:
+        ensure_collection_exists()
+    except VectorServiceUnavailable:
+        raise
+    except Exception as exc:
+        invalidate_vector_probe()
+        if _is_connectivity_error(exc):
+            status, detail = _classify_probe_exception(exc)
+            logger.error("Qdrant collection check failed | status=%s | error=%s", status, exc)
+            raise VectorServiceUnavailable(detail) from exc
+        raise
+
     started = time.perf_counter()
     query_filter = _build_query_filter(
         source_filters=source_filters,
@@ -397,8 +434,16 @@ def search_vectors(
             for p in points
         ]
     except Exception as exc:
+        invalidate_vector_probe()
+        if _is_connectivity_error(exc):
+            status, detail = _classify_probe_exception(exc)
+            logger.error(
+                "Qdrant search failed | session=%s | status=%s | error=%s",
+                session_id, status, exc,
+            )
+            raise VectorServiceUnavailable(detail) from exc
         logger.error(f"Qdrant search failed for session {session_id}: {exc}")
-        return []
+        raise
 
 
 def delete_vectors_by_doc_id(doc_id: str):

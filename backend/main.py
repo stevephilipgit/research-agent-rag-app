@@ -27,7 +27,12 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from infra.vector_db import delete_vectors_older_than, ensure_collection_exists
+from infra.vector_db import (
+    VECTOR_UNAVAILABLE_DETAIL,
+    VectorServiceUnavailable,
+    delete_vectors_older_than,
+    ensure_collection_exists,
+)
 from core.startup_validator import validate_startup_config, full_health_check
 from services.maintenance_service import full_consistency_audit
 from config.settings import ENVIRONMENT
@@ -62,6 +67,14 @@ def rate_limit_handler(request, exc):
         status_code=429,
         content={"message": f"Too many requests. Limit is {REQUESTS_PER_MINUTE}."},
     )
+
+
+@app.exception_handler(VectorServiceUnavailable)
+def vector_service_unavailable_handler(request, exc):
+    logging.getLogger(__name__).warning(
+        "Vector store unavailable | path=%s | reason=%s", request.url.path, exc
+    )
+    return JSONResponse(status_code=503, content={"detail": VECTOR_UNAVAILABLE_DETAIL})
 
 app.add_middleware(
     CORSMiddleware,
