@@ -13,8 +13,8 @@ langchain-openai>=0.1.0
 langchain-text-splitters==0.3.3
 langgraph>=0.2.0
 
-# Vector DB
-qdrant-client>=1.9.0
+# Vector DB (pinned pair: qdrant-client 1.17.1 tested against httpx 0.25.2)
+qdrant-client==1.17.1
 
 # Supabase (pinned compatible set)
 supabase==2.3.4
