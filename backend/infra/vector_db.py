@@ -1,9 +1,10 @@
 import os
 import logging
+import socket
+import threading
 import time
 import shutil
-import builtins
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from qdrant_client import QdrantClient, models
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, before_sleep_log
 from config.settings import (
@@ -20,7 +21,18 @@ logger = logging.getLogger(__name__)
 _IS_DEVELOPMENT = (ENVIRONMENT or "development").strip().lower() == "development"
 _IS_PRODUCTION = (ENVIRONMENT or "development").strip().lower() == "production"
 _QDRANT_TIMEOUT_SECONDS = 60
+_PROBE_TIMEOUT_SECONDS = 3.0
+_PROBE_TTL_SECONDS = 5.0
 _LOCAL_QDRANT_PATH = "./qdrant_local_storage"
+
+
+class VectorServiceUnavailable(RuntimeError):
+    """Raised when the vector store is known to be unavailable.
+
+    Callers at the API boundary translate this into HTTP 503 so an
+    unavailable vector store is never reported as an empty, successful
+    retrieval.
+    """
 
 
 @retry(
@@ -42,16 +54,10 @@ def _connect_cloud_qdrant() -> QdrantClient:
 
 
 def _make_client() -> QdrantClient:
-    existing = getattr(builtins, "_RA_QDRANT_CLIENT_SINGLETON", None)
-    if existing is not None:
-        return existing
-
     if _IS_DEVELOPMENT:
         # Development mode always uses embedded Qdrant to preserve local/offline flow.
         logger.info("Using embedded Qdrant (development) | path=%s", _LOCAL_QDRANT_PATH)
-        c = QdrantClient(path=_LOCAL_QDRANT_PATH, timeout=_QDRANT_TIMEOUT_SECONDS)
-        setattr(builtins, "_RA_QDRANT_CLIENT_SINGLETON", c)
-        return c
+        return QdrantClient(path=_LOCAL_QDRANT_PATH, timeout=_QDRANT_TIMEOUT_SECONDS)
 
     if _IS_PRODUCTION:
         if not QDRANT_URL or not QDRANT_API_KEY:
@@ -61,7 +67,6 @@ def _make_client() -> QdrantClient:
         try:
             c = _connect_cloud_qdrant()
             logger.info("Connected to cloud Qdrant | url=%s", QDRANT_URL)
-            setattr(builtins, "_RA_QDRANT_CLIENT_SINGLETON", c)
             return c
         except Exception:
             logger.exception("Cloud Qdrant unavailable after retries")
@@ -71,8 +76,6 @@ def _make_client() -> QdrantClient:
     logger.error(msg)
     raise RuntimeError(msg)
 
-
-import threading
 
 _client_lock = threading.Lock()
 _client_instance: Optional[QdrantClient] = None
@@ -108,11 +111,104 @@ def get_client() -> QdrantClient:
     return _client_instance
 
 # QDRANT_AVAILABLE is now a property or check
-def is_qdrant_available():
+def _classify_probe_exception(exc: Exception) -> Tuple[str, str]:
+    """Map a probe exception to a dependency status."""
     try:
-        return get_client() is not None
-    except Exception:
-        return False
+        from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
+    except ImportError:  # pragma: no cover - defensive
+        ResponseHandlingException = UnexpectedResponse = ()
+
+    if UnexpectedResponse and isinstance(exc, UnexpectedResponse):
+        if getattr(exc, "status_code", None) in (401, 403):
+            return "authentication_failure", f"Qdrant rejected credentials (HTTP {exc.status_code})"
+        return "unavailable", f"Qdrant returned HTTP {exc.status_code}"
+
+    cause = exc.__cause__ or exc.__context__
+    combined = " ".join(str(part) for part in (exc, cause) if part is not None)
+    lowered = combined.lower()
+
+    try:
+        import httpx
+
+        if isinstance(exc, httpx.TimeoutException) or isinstance(cause, httpx.TimeoutException):
+            return "timeout", f"Qdrant probe timed out: {combined}"
+    except ImportError:  # pragma: no cover - httpx is a hard dependency
+        pass
+
+    if isinstance(exc, (TimeoutError, socket.timeout)) or isinstance(cause, (TimeoutError, socket.timeout)):
+        return "timeout", f"Qdrant probe timed out: {combined}"
+    if "timed out" in lowered or "timeout" in lowered:
+        return "timeout", f"Qdrant probe timed out: {combined}"
+
+    if ResponseHandlingException and isinstance(exc, ResponseHandlingException):
+        return "unavailable", f"Qdrant connection failed: {combined}"
+    return "unavailable", f"Qdrant probe failed: {combined}"
+
+
+def _run_probe(timeout: float) -> Tuple[str, str]:
+    if _IS_DEVELOPMENT:
+        # In-process embedded store: reuse the shared client (fast, no network).
+        try:
+            get_client().get_collections()
+            return "healthy", "embedded qdrant reachable"
+        except Exception as exc:
+            status, detail = _classify_probe_exception(exc)
+            return status, detail
+
+    if not QDRANT_URL or not QDRANT_API_KEY:
+        return "misconfigured", "QDRANT_URL and QDRANT_API_KEY are required in production"
+
+    try:
+        probe_client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY, timeout=timeout)
+        probe_client.get_collections()
+        return "healthy", "cloud qdrant reachable"
+    except Exception as exc:
+        return _classify_probe_exception(exc)
+
+
+_probe_lock = threading.Lock()
+_probe_cache: Dict[str, Any] = {"status": None, "detail": "", "checked_at": 0.0}
+
+
+def probe_vector_store(force: bool = False, timeout: float = _PROBE_TIMEOUT_SECONDS) -> Dict[str, str]:
+    """Lightweight, TTL-cached health probe for the vector store.
+
+    Deliberately does NOT use the tenacity retry stack so health checks and
+    request guards stay fast (single attempt, short timeout).
+    """
+    with _probe_lock:
+        now = time.monotonic()
+        cached_status = _probe_cache["status"]
+        if (
+            not force
+            and cached_status is not None
+            and (now - float(_probe_cache["checked_at"])) < _PROBE_TTL_SECONDS
+        ):
+            return {"status": cached_status, "detail": str(_probe_cache["detail"])}
+
+        status, detail = _run_probe(timeout)
+        if status != cached_status:
+            log = logger.warning if status != "healthy" else logger.info
+            log("Vector store probe result changed | status=%s | detail=%s", status, detail)
+        _probe_cache.update(status=status, detail=detail, checked_at=time.monotonic())
+        return {"status": status, "detail": detail}
+
+
+def invalidate_vector_probe() -> None:
+    """Force the next probe to re-check (used after mid-request failures)."""
+    with _probe_lock:
+        _probe_cache["checked_at"] = 0.0
+
+
+def ensure_vector_service_available() -> None:
+    """Raise VectorServiceUnavailable when the vector store is not healthy."""
+    result = probe_vector_store()
+    if result["status"] != "healthy":
+        raise VectorServiceUnavailable(result["detail"] or "Vector store unavailable")
+
+
+def is_qdrant_available():
+    return probe_vector_store()["status"] == "healthy"
 
 # For backward compatibility
 client = None # Will be initialized via get_client() where used
