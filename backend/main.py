@@ -133,6 +133,10 @@ def healthcheck():
         "llm": _ok("llm"),
         "storage": _ok("storage"),
         "cache": _ok("cache"),
+        "dependencies": {
+            name: {"status": state["status"], "detail": state["detail"]}
+            for name, state in checks.items()
+        },
     }
 
 
