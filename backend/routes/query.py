@@ -29,7 +29,12 @@ from services.rag_service import (
 from services.security import validate_session_id
 from services.maintenance_service import cleanup_orphan_documents
 from core.telemetry import get_logs as get_structured_logs, subscribe, unsubscribe, wait_for_log
-from infra.vector_db import delete_session_vectors
+from infra.vector_db import (
+    VECTOR_UNAVAILABLE_DETAIL,
+    VectorServiceUnavailable,
+    delete_session_vectors,
+    ensure_vector_service_available,
+)
 
 router = APIRouter(prefix="/api", tags=["api"])
 logger = logging.getLogger(__name__)
@@ -71,8 +76,11 @@ def query_endpoint(
     session_id: Optional[str] = Header(None, alias="X-Session-ID"),
 ):
     resolved = _require_session_id(session_id, payload.session_id, auto_generate=False)
+    ensure_vector_service_available()
     try:
         return query_agent(payload.query, resolved, payload.enable_self_healing)
+    except VectorServiceUnavailable:
+        raise
     except HTTPException:
         raise
     except Exception:
@@ -88,6 +96,9 @@ def query_stream_endpoint(
     session_id: Optional[str] = Header(None, alias="X-Session-ID"),
 ):
     resolved = _require_session_id(session_id, payload.session_id, auto_generate=False)
+    # Must run before the StreamingResponse is created: once streaming starts,
+    # the HTTP status is already committed and cannot become a 503.
+    ensure_vector_service_available()
 
     def event_stream():
         try:
@@ -116,12 +127,18 @@ async def upload_endpoint(
 ):
     # Uploads always get a session; auto-generate if not supplied
     resolved = _require_session_id(session_id, auto_generate=True)
+    ensure_vector_service_available()
     try:
         return await upload_documents(files, session_id=resolved)
+    except VectorServiceUnavailable:
+        raise
     except HTTPException:
         raise
     except Exception as e:
         logger.exception("Upload endpoint error")
+        if "Qdrant is unavailable" in str(e):
+            # Ingestion refused because the vector store went away mid-request
+            raise HTTPException(status_code=503, detail=VECTOR_UNAVAILABLE_DETAIL)
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
 

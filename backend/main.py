@@ -27,7 +27,12 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from infra.vector_db import delete_vectors_older_than, ensure_collection_exists
+from infra.vector_db import (
+    VECTOR_UNAVAILABLE_DETAIL,
+    VectorServiceUnavailable,
+    delete_vectors_older_than,
+    ensure_collection_exists,
+)
 from core.startup_validator import validate_startup_config, full_health_check
 from services.maintenance_service import full_consistency_audit
 from config.settings import ENVIRONMENT
@@ -63,6 +68,14 @@ def rate_limit_handler(request, exc):
         content={"message": f"Too many requests. Limit is {REQUESTS_PER_MINUTE}."},
     )
 
+
+@app.exception_handler(VectorServiceUnavailable)
+def vector_service_unavailable_handler(request, exc):
+    logging.getLogger(__name__).warning(
+        "Vector store unavailable | path=%s | reason=%s", request.url.path, exc
+    )
+    return JSONResponse(status_code=503, content={"detail": VECTOR_UNAVAILABLE_DETAIL})
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -84,8 +97,11 @@ app.include_router(query_router)
 @app.on_event("startup")
 async def startup():
     logger = logging.getLogger(__name__)
-    validate_startup_config()
-    
+    # Configuration errors raise here; dependency unavailability does not —
+    # the app boots degraded and /health reports the failing dependencies.
+    report = validate_startup_config()
+    app.state.startup_report = report
+
     # Run consistency audit in background so it doesn't block startup (Task 7 & 8)
     asyncio.create_task(full_consistency_audit())
 
@@ -99,9 +115,12 @@ async def startup():
     if not scheduler.running:
         scheduler.start()
         logger.info("APScheduler started: Session cleanup job registered.")
-    
-    ensure_collection_exists()
-    logger.info("Qdrant collection and indexes verified on startup")
+
+    try:
+        ensure_collection_exists()
+        logger.info("Qdrant collection and indexes verified on startup")
+    except Exception:
+        logger.exception("Collection verification failed; continuing in degraded mode")
 
 
 @app.get("/")
@@ -116,13 +135,21 @@ def health():
 @app.get("/health")
 def healthcheck():
     status, checks = full_health_check()
+
+    def _ok(name: str) -> bool:
+        return checks[name]["status"] in ("healthy", "not_configured")
+
     return {
         "status": status,
         "environment": ENVIRONMENT,
-        "qdrant": checks["qdrant"],
-        "llm": checks["llm"],
-        "storage": checks["storage"],
-        "cache": checks["cache"],
+        "qdrant": _ok("qdrant"),
+        "llm": _ok("llm"),
+        "storage": _ok("storage"),
+        "cache": _ok("cache"),
+        "dependencies": {
+            name: {"status": state["status"], "detail": state["detail"]}
+            for name, state in checks.items()
+        },
     }
 
 
