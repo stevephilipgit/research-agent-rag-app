@@ -1,9 +1,9 @@
 """Test suite for extension components: caching, query rewriting, and hybrid retrieval."""
 from langchain_core.documents import Document
 
-from core.rag import _merge_results, hybrid_retrieve
-from services.query_rewriter import rewrite_query
-from utils.cache import get_embedding_cache, get_query_cache, set_embedding_cache, set_query_cache
+from app.rag.retrieval.retriever import _merge_results, hybrid_retrieve
+from app.rag.retrieval.query_rewriter import rewrite_query
+from app.infrastructure.cache.redis_cache import get_embedding_cache, get_query_cache, set_embedding_cache, set_query_cache
 
 
 def test_query_cache_round_trip():

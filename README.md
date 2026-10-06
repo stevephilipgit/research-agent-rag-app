@@ -92,20 +92,43 @@ To eliminate hallucinations, every answer passes through a rigorous **Grounding 
 
 ```plaintext
 research-assistant/
-├── backend/              # FastAPI Orchestrator
-│   ├── Dockerfile        # Production build context
-│   ├── core/             # Agentic Brain (LangGraph, Reranker, Telemetry)
-│   ├── services/         # Intelligence (Validation, Self-Healing, Maintenance)
-│   ├── infra/            # Persistence (Qdrant, Supabase, Redis)
-│   ├── routes/           # API Endpoints
-│   └── scripts/          # Migration & Reset tools
-├── frontend/             # Vite/React UI
-│   ├── Dockerfile        # Production build context
-│   └── src/              # React source (Hooks, Components, Pages)
-├── docker-compose.yml    # Full-stack orchestration
-├── render.yaml           # Deployment manifest
-└── supabase_migration.sql # Database schema
+├── backend/                    # Python backend (package root)
+│   ├── main.py                 # Thin entry shim - keeps `uvicorn main:app` working
+│   ├── Dockerfile              # Production build context
+│   ├── app/                    # Application package (all runtime code lives here)
+│   │   ├── main.py             # FastAPI app: middleware, CORS, startup, scheduler, exception handlers
+│   │   ├── api/                # HTTP layer
+│   │   │   ├── dependencies.py # Shared request dependencies (session resolution)
+│   │   │   └── routes/         # One module per endpoint group: query, documents, sessions, logs, admin, health
+│   │   ├── core/               # Cross-cutting: config, LLM, exceptions, telemetry, rate limiter, startup validation
+│   │   ├── domain/             # API contracts (Pydantic schemas)
+│   │   ├── agents/             # LangGraph agent: graph, state, prompts, tools
+│   │   ├── rag/                # RAG pipeline
+│   │   │   ├── ingestion/      # Document loading + downloads
+│   │   │   ├── retrieval/      # Retriever, reranker, query rewriter
+│   │   │   └── generation/     # Context compression
+│   │   ├── services/           # Business logic: rag_service, maintenance, security, memory, self-healing
+│   │   ├── infrastructure/     # Outbound adapters (I/O only): vector_store/, database/, storage/, cache/
+│   │   └── utils/              # Generic helpers: retry, sanitize, streaming
+│   ├── scripts/                # Migration & reset tools
+│   └── tests/                  # Backend-scoped tests
+├── tests/                      # Root test suite (pytest.ini at repo root)
+├── frontend/                   # Vite/React UI
+│   ├── Dockerfile              # Production build context
+│   └── src/                    # React source (Hooks, Components, Pages)
+├── docker-compose.yml          # Full-stack orchestration
+├── render.yaml                 # Deployment manifest (start command unchanged)
+└── supabase_migration.sql      # Database schema
 ```
+
+**Dependency direction** (enforced by convention, no cycles):
+
+```plaintext
+api/routes  →  services  →  rag / agents  →  infrastructure
+     ↓             ↓            ↓
+   domain        core  ←────────┘
+```
+
 
 ---
 

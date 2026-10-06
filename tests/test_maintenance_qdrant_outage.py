@@ -11,8 +11,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-import infra.db as db_module
-import services.maintenance_service as maintenance
+import app.infrastructure.database.registry as db_module
+import app.services.maintenance_service as maintenance
 
 
 def _old_timestamp():

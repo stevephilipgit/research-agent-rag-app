@@ -169,9 +169,9 @@ as the system tried different strategies."
 ## 📝 Files Modified
 
 ### Backend
-- `backend/models/schema.py` - Schema updates
-- `backend/routes/query.py` - API endpoint updates  
-- `backend/services/rag_service.py` - Metrics integration
+- `backend/app/domain/schemas.py` - Schema updates
+- `backend/app/api/routes/` - API endpoint updates  
+- `backend/app/services/rag_service.py` - Metrics integration
 
 ### Frontend
 - `frontend/src/pages/App.jsx` - Toggle button, state management
