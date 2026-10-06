@@ -10,8 +10,8 @@ if str(backend_dir) not in sys.path:
 import logging
 logging.basicConfig(level=logging.DEBUG)
 
-from infra.storage import upload_file, get_file_url, delete_file, _get_client
-from config.settings import BUCKET_NAME
+from app.infrastructure.storage.supabase import upload_file, get_file_url, delete_file, _get_client
+from app.core.config import BUCKET_NAME
 
 async def main():
     print("=== ISOLATED SUPABASE UPLOAD TEST ===")

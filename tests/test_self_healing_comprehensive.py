@@ -10,10 +10,10 @@ from pathlib import Path
 BACKEND_PATH = Path(__file__).parent.parent / "backend"
 sys.path.insert(0, str(BACKEND_PATH))
 
-from services.eval_engine import EvaluationEngine
-from services.decision_engine import DecisionEngine
-from services.strategy_manager import StrategyManager
-from services.self_healing import (
+from app.services.eval_engine import EvaluationEngine
+from app.services.decision_engine import DecisionEngine
+from app.services.strategy_manager import StrategyManager
+from app.services.self_healing import (
     self_healing_flow,
     get_retrieval_params,
     get_model,
@@ -193,7 +193,7 @@ def test_retrieval_adaptation():
 # TEST 9: METRICS LOGGING
 def test_metrics_logging():
     """Test 9: Metrics logging - required fields present."""
-    from services.metrics_service import MetricsService
+    from app.services.metrics_service import MetricsService
     
     # Test that method accepts all required params without error
     try:

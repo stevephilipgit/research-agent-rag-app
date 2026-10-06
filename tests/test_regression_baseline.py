@@ -3,8 +3,8 @@
 Tests baseline behaviors and ensures backward compatibility of
 the evaluation and decision engines.
 """
-from services.decision_engine import DecisionEngine
-from services.eval_engine import EvaluationEngine
+from app.services.decision_engine import DecisionEngine
+from app.services.eval_engine import EvaluationEngine
 
 
 def test_eval_engine_compatibility():

@@ -14,7 +14,7 @@ The self-healing layer is an optional, production-grade feature that improves LL
 ### Components
 
 ```
-backend/services/
+backend/app/services/
 ├── eval_engine.py          # Response evaluation with heuristics
 ├── decision_engine.py      # Manages accept/improve/retry decisions
 ├── strategy_manager.py     # Query modification strategies
@@ -62,14 +62,14 @@ Default is `false` (disabled) for backward compatibility.
 
 ### 2. Verify Installation
 
-All required modules are in `backend/services/`:
+All required modules are in `backend/app/services/`:
 
 ```bash
-ls -la backend/services/eval_engine.py
-ls -la backend/services/decision_engine.py
-ls -la backend/services/strategy_manager.py
-ls -la backend/services/self_healing.py
-ls -la backend/services/metrics_service.py
+ls -la backend/app/services/eval_engine.py
+ls -la backend/app/services/decision_engine.py
+ls -la backend/app/services/strategy_manager.py
+ls -la backend/app/services/self_healing.py
+ls -la backend/app/services/metrics_service.py
 ```
 
 ## Usage
@@ -316,7 +316,7 @@ class StrategyManager:
 The evaluation engine uses lightweight heuristics and is designed for easy extension:
 
 ```python
-# backend/services/eval_engine.py
+# backend/app/services/eval_engine.py
 
 class EvaluationEngine:
     def _relevance_score(self, query: str, response: str) -> float:
@@ -406,7 +406,7 @@ Check logs for `scope="self_healing"` entries.
 ### Feature Not Activating
 
 1. Verify `ENABLE_SELF_HEALING=true` in environment
-2. Check Python imports: `from config.settings import ENABLE_SELF_HEALING`
+2. Check Python imports: `from app.core.config import ENABLE_SELF_HEALING`
 3. Look for warnings in startup logs
 
 ### High Retry Rates
@@ -491,4 +491,4 @@ For issues or questions about the self-healing layer:
 
 1. Check logs: `grep "Self-Healing" logs/app.log`
 2. Enable debug logging: Set log level to DEBUG
-3. Test individual components: `python -c "from services.eval_engine import EvaluationEngine; ..."`
+3. Test individual components: `python -c "from app.services.eval_engine import EvaluationEngine; ..."`

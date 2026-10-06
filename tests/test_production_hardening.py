@@ -12,9 +12,9 @@ work correctly.
 from pathlib import Path
 from fastapi.testclient import TestClient
 
-from core import agent as agent_module
-from core import document_loader as loader_module
-from infra import vector_db as vector_db_module
+from app.agents import graph as agent_module
+from app.rag.ingestion import document_loader as loader_module
+from app.infrastructure.vector_store import qdrant as vector_db_module
 from main import app
 
 
@@ -62,7 +62,7 @@ def test_upload_endpoint_wires_through_service(monkeypatch):
             "message": "Upload process finished",
         }
 
-    import routes.query as runtime_query_routes
+    import app.api.routes.documents as runtime_query_routes
     monkeypatch.setattr(runtime_query_routes, "upload_documents", fake_upload)
 
     client = TestClient(app)

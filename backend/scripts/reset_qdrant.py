@@ -5,7 +5,7 @@ backend_dir = Path(__file__).resolve().parents[1]
 if str(backend_dir) not in sys.path:
     sys.path.insert(0, str(backend_dir))
 
-from infra.vector_db import get_client, COLLECTION_NAME
+from app.infrastructure.vector_store.qdrant import get_client, COLLECTION_NAME
 
 def reset():
     print(f"Attempting to reset Qdrant collection: '{COLLECTION_NAME}'")

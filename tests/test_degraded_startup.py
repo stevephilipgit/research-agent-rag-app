@@ -13,10 +13,10 @@ import pytest
 from fastapi.testclient import TestClient
 from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
 
-import core.startup_validator as validator
-import infra.vector_db as vector_db
-import main as main_module
-from infra.vector_db import VECTOR_UNAVAILABLE_DETAIL, VectorServiceUnavailable
+import app.core.startup_validator as validator
+import app.infrastructure.vector_store.qdrant as vector_db
+import app.main as main_module
+from app.core.exceptions import VECTOR_UNAVAILABLE_DETAIL, VectorServiceUnavailable
 from main import app
 
 

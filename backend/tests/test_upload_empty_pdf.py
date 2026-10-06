@@ -77,15 +77,15 @@ class TestUploadEmptyPdfNoDBRecord:
 
         with (
             # security passes
-            patch("services.rag_service.validate_file", return_value=True),
-            patch("services.rag_service.sanitize_filename", return_value="empty.pdf"),
+            patch("app.services.rag_service.validate_file", return_value=True),
+            patch("app.services.rag_service.sanitize_filename", return_value="empty.pdf"),
             # no duplicate in DB
-            patch("services.rag_service.get_session_document_count", return_value=0),
+            patch("app.services.rag_service.get_session_document_count", return_value=0),
             # storage upload succeeds — returns a path
-            patch("services.rag_service.upload_file", return_value=fake_storage_path),
+            patch("app.services.rag_service.upload_file", return_value=fake_storage_path),
             # ingest_documents reports 0 chunks — simulates empty/unreadable PDF
             patch(
-                "services.rag_service.ingest_documents",
+                "app.services.rag_service.ingest_documents",
                 return_value={
                     "status": "error",
                     "message": "Chunking resulted in 0 chunks.",
@@ -96,7 +96,7 @@ class TestUploadEmptyPdfNoDBRecord:
             ),
             # db.get_by_hash — no existing record
             patch(
-                "services.rag_service.db",
+                "app.services.rag_service.db",
                 get_by_hash=AsyncMock(return_value=None),
                 insert=AsyncMock(side_effect=AssertionError("db.insert must NOT be called for an empty PDF")),
                 update=AsyncMock(),
@@ -104,12 +104,12 @@ class TestUploadEmptyPdfNoDBRecord:
                 query_documents=AsyncMock(return_value=[]),
             ),
             # delete_file spy — should be called for rollback
-            patch("services.rag_service.delete_file") as mock_delete_file,
-            patch("services.rag_service.get_file_url", return_value="https://example.com/fake"),
-            patch("services.rag_service.is_file_hash_indexed_in_qdrant", return_value=False),
-            patch("services.rag_service.file_exists", return_value=False),
+            patch("app.services.rag_service.delete_file") as mock_delete_file,
+            patch("app.services.rag_service.get_file_url", return_value="https://example.com/fake"),
+            patch("app.services.rag_service.is_file_hash_indexed_in_qdrant", return_value=False),
+            patch("app.services.rag_service.file_exists", return_value=False),
         ):
-            from services.rag_service import upload_documents
+            from app.services.rag_service import upload_documents
 
             with pytest.raises(HTTPException) as exc_info:
                 await upload_documents([upload_file], session_id="test-session")
@@ -127,12 +127,12 @@ class TestUploadEmptyPdfNoDBRecord:
         fake_storage_path = "uploads/test-session/empty.pdf"
 
         with (
-            patch("services.rag_service.validate_file", return_value=True),
-            patch("services.rag_service.sanitize_filename", return_value="empty.pdf"),
-            patch("services.rag_service.get_session_document_count", return_value=0),
-            patch("services.rag_service.upload_file", return_value=fake_storage_path),
+            patch("app.services.rag_service.validate_file", return_value=True),
+            patch("app.services.rag_service.sanitize_filename", return_value="empty.pdf"),
+            patch("app.services.rag_service.get_session_document_count", return_value=0),
+            patch("app.services.rag_service.upload_file", return_value=fake_storage_path),
             patch(
-                "services.rag_service.ingest_documents",
+                "app.services.rag_service.ingest_documents",
                 return_value={
                     "status": "error",
                     "message": "Chunking resulted in 0 chunks.",
@@ -142,19 +142,19 @@ class TestUploadEmptyPdfNoDBRecord:
                 },
             ),
             patch(
-                "services.rag_service.db",
+                "app.services.rag_service.db",
                 get_by_hash=AsyncMock(return_value=None),
                 insert=AsyncMock(side_effect=AssertionError("db.insert must NOT be called")),
                 update=AsyncMock(),
                 delete=AsyncMock(),
                 query_documents=AsyncMock(return_value=[]),
             ),
-            patch("services.rag_service.delete_file") as mock_delete_file,
-            patch("services.rag_service.get_file_url", return_value="https://example.com/fake"),
-            patch("services.rag_service.is_file_hash_indexed_in_qdrant", return_value=False),
-            patch("services.rag_service.file_exists", return_value=False),
+            patch("app.services.rag_service.delete_file") as mock_delete_file,
+            patch("app.services.rag_service.get_file_url", return_value="https://example.com/fake"),
+            patch("app.services.rag_service.is_file_hash_indexed_in_qdrant", return_value=False),
+            patch("app.services.rag_service.file_exists", return_value=False),
         ):
-            from services.rag_service import upload_documents
+            from app.services.rag_service import upload_documents
 
             with pytest.raises(HTTPException):
                 await upload_documents(
@@ -173,12 +173,12 @@ class TestUploadEmptyPdfNoDBRecord:
         db_insert_mock = AsyncMock()
 
         with (
-            patch("services.rag_service.validate_file", return_value=True),
-            patch("services.rag_service.sanitize_filename", return_value="empty.pdf"),
-            patch("services.rag_service.get_session_document_count", return_value=0),
-            patch("services.rag_service.upload_file", return_value=fake_storage_path),
+            patch("app.services.rag_service.validate_file", return_value=True),
+            patch("app.services.rag_service.sanitize_filename", return_value="empty.pdf"),
+            patch("app.services.rag_service.get_session_document_count", return_value=0),
+            patch("app.services.rag_service.upload_file", return_value=fake_storage_path),
             patch(
-                "services.rag_service.ingest_documents",
+                "app.services.rag_service.ingest_documents",
                 return_value={
                     "status": "error",
                     "message": "Chunking resulted in 0 chunks.",
@@ -188,19 +188,19 @@ class TestUploadEmptyPdfNoDBRecord:
                 },
             ),
             patch(
-                "services.rag_service.db",
+                "app.services.rag_service.db",
                 get_by_hash=AsyncMock(return_value=None),
                 insert=db_insert_mock,
                 update=AsyncMock(),
                 delete=AsyncMock(),
                 query_documents=AsyncMock(return_value=[]),
             ),
-            patch("services.rag_service.delete_file"),
-            patch("services.rag_service.get_file_url", return_value="https://example.com/fake"),
-            patch("services.rag_service.is_file_hash_indexed_in_qdrant", return_value=False),
-            patch("services.rag_service.file_exists", return_value=False),
+            patch("app.services.rag_service.delete_file"),
+            patch("app.services.rag_service.get_file_url", return_value="https://example.com/fake"),
+            patch("app.services.rag_service.is_file_hash_indexed_in_qdrant", return_value=False),
+            patch("app.services.rag_service.file_exists", return_value=False),
         ):
-            from services.rag_service import upload_documents
+            from app.services.rag_service import upload_documents
 
             with pytest.raises(HTTPException):
                 await upload_documents(
@@ -232,25 +232,25 @@ class TestStorageFailureNoDBRecord:
         db_insert_mock = AsyncMock()
 
         with (
-            patch("services.rag_service.validate_file", return_value=True),
-            patch("services.rag_service.sanitize_filename", return_value="report.pdf"),
-            patch("services.rag_service.get_session_document_count", return_value=0),
+            patch("app.services.rag_service.validate_file", return_value=True),
+            patch("app.services.rag_service.sanitize_filename", return_value="report.pdf"),
+            patch("app.services.rag_service.get_session_document_count", return_value=0),
             patch(
-                "services.rag_service.upload_file",
+                "app.services.rag_service.upload_file",
                 side_effect=RuntimeError("Supabase returned 400 Bad Request"),
             ),
             patch(
-                "services.rag_service.db",
+                "app.services.rag_service.db",
                 get_by_hash=AsyncMock(return_value=None),
                 insert=db_insert_mock,
                 update=AsyncMock(),
                 delete=AsyncMock(),
                 query_documents=AsyncMock(return_value=[]),
             ),
-            patch("services.rag_service.is_file_hash_indexed_in_qdrant", return_value=False),
-            patch("services.rag_service.file_exists", return_value=False),
+            patch("app.services.rag_service.is_file_hash_indexed_in_qdrant", return_value=False),
+            patch("app.services.rag_service.file_exists", return_value=False),
         ):
-            from services.rag_service import upload_documents
+            from app.services.rag_service import upload_documents
 
             with pytest.raises(HTTPException) as exc_info:
                 await upload_documents(
